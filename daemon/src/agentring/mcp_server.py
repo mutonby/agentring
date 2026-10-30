@@ -19,7 +19,7 @@ from dataclasses import asdict
 from typing import Any
 
 from . import __version__
-from .config import Settings, home_dir, secret
+from .config import Settings, home_dir
 from .relay_client import RelayClient, RelayError
 from .store import Store
 from .sync import catch_up
@@ -132,9 +132,12 @@ class AgentringTools:
             from .voice.quick import DEFAULT_INSTRUCTIONS, build_agent, missed_call_message
         except ImportError:
             raise ToolError("voice support is not installed: install agentring with the [voice] extra") from None
-        key = secret("GEMINI_API_KEY")
-        if not key:
-            raise ToolError("calls need GEMINI_API_KEY (environment or ~/.agentring/.env)")
+        from .voice.providers import VoiceConfigError, resolve_voice
+
+        try:  # AGENTRING_VOICE_PROVIDER/_MODEL/_NAME, like `call --ai`
+            choice = resolve_voice()
+        except VoiceConfigError as e:
+            raise ToolError(f"calls: {e}") from None
         agents = None
         if (home_dir() / "agents.yaml").exists():
             try:
@@ -147,7 +150,7 @@ class AgentringTools:
         if self._call_lock.locked():
             raise ToolError("already on a call")
         async with self._call_lock:
-            built = await build_agent(key, instructions=instructions, agents=agents)
+            built = await build_agent(choice, instructions=instructions, agents=agents)
             try:
                 created = await asyncio.to_thread(self.client.create_call, reason,
                                                   priority="urgent" if urgent else "normal",

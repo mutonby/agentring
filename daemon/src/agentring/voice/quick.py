@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .agents import AgentsConfig, Consultations
-from .gemini import DEFAULT_MODEL, DEFAULT_VOICE, GeminiLive
+from .providers import PROVIDERS, VoiceChoice
 from .session import VoiceAgent
 from .tools import McpClient, Tool, mcp_tools
 
@@ -54,7 +54,7 @@ class BuiltAgent:
 
 
 async def build_agent(
-    api_key: str,
+    voice_ai: VoiceChoice | str,
     *,
     instructions: str | None = None,
     mcp: list[str] | None = None,
@@ -63,8 +63,12 @@ async def build_agent(
     model: str | None = None,
     voice: str | None = None,
 ) -> BuiltAgent:
-    """Gemini Live with the tools of the given MCP servers (only `allow` if given) and of
-    agents.yaml (its MCP servers, and `consult_agent` for its agents). Close it when done."""
+    """A voice AI (`resolve_voice(...)`, or a Gemini API key with `model`/`voice`) with the tools of
+    the given MCP servers (only `allow` if given) and of agents.yaml (its MCP servers, and
+    `consult_agent` for its agents). Close it when done."""
+    if isinstance(voice_ai, str):
+        gemini = PROVIDERS["gemini"]
+        voice_ai = VoiceChoice(gemini, voice_ai, model or gemini.default_model, voice or gemini.default_voice)
     built = BuiltAgent(None, [])  # type: ignore[arg-type]
     tools: list[Tool] = []
     servers = [(url, allow, None) for url in mcp or []]
@@ -81,6 +85,5 @@ async def build_agent(
         built.consultations = Consultations(agents.agents)
         tools.append(built.consultations.tool())
     text = read_instructions(instructions)
-    built.agent = VoiceAgent(lambda: GeminiLive(api_key, model=model or DEFAULT_MODEL, voice=voice or DEFAULT_VOICE),
-                             text, tools)
+    built.agent = VoiceAgent(voice_ai.factory(), text, tools)
     return built

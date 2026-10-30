@@ -14,7 +14,8 @@ cp -r ../../skills/agentring ~/.openclaw/skills/  # when to message and when to 
 ```
 
 Calls need the voice extra and a Gemini API key (free tier available at
-https://aistudio.google.com/apikey):
+https://aistudio.google.com/apikey), or the key of another voice provider (OpenAI, Grok,
+Phonic: [docs/voice.md](../../docs/voice.md#providers)):
 
 ```bash
 uv tool install 'agentring[voice]'

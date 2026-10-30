@@ -27,16 +27,18 @@ self-hosted, no accounts.
 |---|---|---|
 | **M1** | relay + pairing + messages + push | **Done**; verified on the user's Pixel 6 (Android 16), FCM incl. forced Doze (~1.5 s). |
 | **M2** | phone rings locked / Doze in < 5 s with native call UI; audio (echo/tone is fine) | **In progress**: works on the Pixel 6 (locked + Doze → call screen in 1.6 s, in the room ~0.5 s after answer). Group calls + "join the call" while active (`POST /v1/calls/{id}/join`, Join notification/banner; not yet tested on a real phone). TODO: LiveKit in deploy compose, user's listening test, OK. |
-| M3 | Gemini Live conversation (< 1 s turns), OpenAI Realtime optional; `consult_agent` with `backend: command` | **In progress** (merged in #2): generic `agentring.voice` library (VoiceAgent, pluggable `RealtimeBackend`, Gemini Live, Python/MCP tools, hooks), `call --ai`, `serve --ai` answering the phone; live e2e tests pass (docs/voice.md). `consult_agent` + `agents.yaml` done (docs/agents.md; slow answers come as a note, or a message after the call). TODO: OpenAI Realtime backend (optional: Gemini has a free tier), transcripts in the store, real-phone test. |
+| M3 | Gemini Live conversation (< 1 s turns), OpenAI Realtime optional; `consult_agent` with `backend: command` | **In progress** (merged in #2): generic `agentring.voice` library (VoiceAgent, pluggable `RealtimeBackend`, Python/MCP tools, hooks), `call --ai`, `serve --ai` answering the phone; live e2e tests pass (docs/voice.md). Providers: Gemini Live (default), OpenAI Realtime, Grok Voice, Phonic (`--provider` / `AGENTRING_VOICE_PROVIDER`, issue #12); live e2e passes with Gemini, Grok and Phonic, OpenAI only against fake servers so far. `consult_agent` + `agents.yaml` done (docs/agents.md; slow answers come as a note, or a message after the call). TODO: OpenAI live run, transcripts in the store, real-phone test. |
 | M4 | call the agent from the app; missed/declined fallbacks | **In progress**: app side done on branch `m4-call-agent` ("Call agent" → `POST /v1/calls`, joins the room at once, "Calling…" until `call.accept` / agent in the room / poll, cancel while ringing, agent offline / busy / declined / missed messages; not yet tested on a real phone). Agent side: `serve --ai` answers. Missed → `msg.new` fallback done for AI calls (`call --ai`, MCP `call`). |
 | M5 | MCP server, skill, examples, docs, < 15 min quickstart with `docker compose up` | **In progress**: `agentring mcp` (stdio, no SDK), `skills/agentring`, examples (claude-code, n8n), LiveKit + optional daemon in the basic compose, release workflow (signed APK, PyPI, GHCR; docs/release.md), SECURITY/CONTRIBUTING, OEM guide. OpenClaw example + per-harness recipes (docs/agents.md: Claude Code, Codex, opencode, OpenClaw, Hermes, HTTP agents). First release v0.2.0 published 2026-10-28 (release key in GitHub secrets; the maintainer keeps the keystore offline; PyPI job off until AGENTRING_PUBLISH_PYPI=true). Repo public since 2026-10-28: private vulnerability reporting, secret scanning + push protection, Dependabot alerts, rulesets (main: no force-push/deletion; CI required for PRs, admins bypass; v* tags admins only), fork PR workflows need approval. TODO: GHCR packages public (web UI), PyPI trusted publishing. |
 
 Agreed direction for M3: keep agentring agnostic with two plug points — the
-voice backend (OpenAI Realtime first, as the user's `jefe` uses
-`gpt-realtime-2.1-mini`; Gemini Live; later a local OpenAI-Realtime-compatible
-server such as Hugging Face `speech-to-speech`) and the tools (any local MCP
+voice backend (Gemini Live, OpenAI Realtime, Grok Voice, Phonic; later a local
+OpenAI-Realtime-compatible server such as Hugging Face `speech-to-speech` via
+`OpenAIRealtime(url=…)`) and the tools (any local MCP
 server, e.g. jefe-mcp on :8787, plus the built-in `consult_agent`). Over the
-phone, only an allowlist of tools.
+phone, only an allowlist of tools. The user's own agent in production
+(`tonvi-agentes` on Coolify) talks on calls with **Grok Voice**; its
+`VOICE_PROVIDER=openai` is only the Telegram voice-note transcription.
 
 Dependency policy (user asked for care after recent supply-chain attacks):
 prefer releases at least ~2 weeks old, pin exact versions, check the lockfiles

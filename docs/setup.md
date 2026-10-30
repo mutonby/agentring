@@ -132,7 +132,7 @@ agentring msg "hello"                 # the phone gets a notification; reply fro
 agentring replies                     # your reply
 
 agentring call "test"                 # rings; answer and you hear a greeting, then your own voice echoed
-echo GEMINI_API_KEY=... >> ~/.agentring/.env   # free key: https://aistudio.google.com/apikey
+echo GEMINI_API_KEY=... >> ~/.agentring/.env   # free key: https://aistudio.google.com/apikey (or another provider: voice.md)
 agentring call "The backup failed" --ai        # a voice AI tells you why it's calling and talks with you
 ```
 
@@ -161,7 +161,7 @@ other harnesses, and how to let the voice AI ask your agents for help during a c
 | Messages arrive only with the app open | `agentring status` says `NO push token`: put the Firebase files in `deploy/secrets/`, uncomment the `FCM_` lines, restart, and pair again. |
 | The phone doesn't ring when locked | Firebase (above), then the battery settings for your phone: [troubleshooting-oem.md](troubleshooting-oem.md). |
 | The call connects but there is no sound | Call audio needs UDP 50000–50100 and TCP 7881 open to the phone. On a VPS, set `LIVEKIT_NODE_IP` to its public IPv4. |
-| `agentring call --ai` says it needs a key | `GEMINI_API_KEY` in `~/.agentring/.env`. |
+| `agentring call --ai` says it needs a key | The provider's key in `~/.agentring/.env`: `GEMINI_API_KEY` by default, or `OPENAI_API_KEY` / `XAI_API_KEY` / `PHONIC_API_KEY` ([voice.md](voice.md#providers)). |
 
 ### Running the relay without Docker (development)
 

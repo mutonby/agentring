@@ -1,4 +1,4 @@
-"""The plug point for realtime speech-to-speech models (Gemini Live today; OpenAI Realtime next).
+"""The plug point for realtime speech-to-speech models (Gemini Live, OpenAI Realtime, Grok Voice, Phonic).
 
 A backend turns a model's wire protocol into a few plain events. The call session
 (session.py) never sees a provider's JSON, so adding a provider means one class.

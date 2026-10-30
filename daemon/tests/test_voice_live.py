@@ -1,9 +1,12 @@
-"""A whole AI call against a real relay, a real LiveKit and the real Gemini Live, with a simulated phone.
+"""A whole AI call against a real relay, a real LiveKit and a real voice model, with a simulated phone.
 
-Opt-in (needs a LiveKit server and a Gemini key; costs a few cents):
+Opt-in (needs a LiveKit server and the provider's key; costs a few cents):
 
     AGENTRING_TEST_LIVEKIT_URL=ws://127.0.0.1:7880 AGENTRING_TEST_LIVEKIT_KEY=devkey \\
     AGENTRING_TEST_LIVEKIT_SECRET=... GEMINI_API_KEY=... uv run --extra voice pytest tests/test_voice_live.py -s
+
+AGENTRING_TEST_PROVIDER picks another provider (openai, grok, phonic; its key instead of
+GEMINI_API_KEY) and AGENTRING_TEST_MODEL another model.
 
 The phone answers, waits for the greeting, asks for the time (the agent must use a
 tool to know it), then says goodbye (the agent must hang up). The phone speaks with
@@ -25,15 +28,17 @@ pytest.importorskip("livekit")
 from livekit import rtc  # noqa: E402
 
 from agentring.relay_client import RelayClient  # noqa: E402
-from agentring.voice import CallInfo, GeminiLive, Prompts, Tool, VoiceAgent  # noqa: E402
+from agentring.voice import CallInfo, Prompts, Tool, VoiceAgent  # noqa: E402
 from agentring.voice.echo import SAMPLE_RATE, synthesize  # noqa: E402
+from agentring.voice.providers import PROVIDERS, resolve_voice  # noqa: E402
 
 from .conftest import API_KEY  # noqa: E402
 
 LK_URL = os.environ.get("AGENTRING_TEST_LIVEKIT_URL")
+PROVIDER = PROVIDERS[os.environ.get("AGENTRING_TEST_PROVIDER", "gemini")]
 pytestmark = pytest.mark.skipif(
-    not (LK_URL and os.environ.get("GEMINI_API_KEY") and shutil.which("say")),
-    reason="needs AGENTRING_TEST_LIVEKIT_URL/KEY/SECRET, GEMINI_API_KEY and macOS say",
+    not (LK_URL and os.environ.get(PROVIDER.key_env) and shutil.which("say")),
+    reason=f"needs AGENTRING_TEST_LIVEKIT_URL/KEY/SECRET, {PROVIDER.key_env} and macOS say",
 )
 
 
@@ -115,7 +120,7 @@ def test_ai_call_end_to_end(livekit_env, relay: str):
     device = client.list_devices()[0]["device_id"]
 
     agent = VoiceAgent(
-        lambda: GeminiLive(os.environ["GEMINI_API_KEY"], model=os.environ.get("AGENTRING_TEST_MODEL", "gemini-3.8-live")),
+        resolve_voice(PROVIDER.name, model=os.environ.get("AGENTRING_TEST_MODEL")).factory(),
         "Eres un asistente de pruebas que habla por teléfono en castellano. Frases muy cortas. "
         "No sabes la hora: si te la preguntan, usa la herramienta hora y di exactamente lo que devuelva. "
         "Cuando el usuario se despida, despídete en una frase y usa end_call.",
@@ -172,7 +177,8 @@ def test_phone_calls_the_agent(livekit_env, relay: str, agentring_home, tmp_path
         [sys.executable, "-m", "agentring.cli", "-v", "serve", "--ai", "--instructions",
          "Eres un asistente de pruebas por teléfono, en castellano y con frases muy cortas. "
          "Cuando el usuario se despida, despídete y usa end_call."],
-        stdout=open(log_path, "w"), stderr=subprocess.STDOUT, env={**os.environ, "AGENTRING_HOME": str(agentring_home)})
+        stdout=open(log_path, "w"), stderr=subprocess.STDOUT,
+        env={**os.environ, "AGENTRING_HOME": str(agentring_home), "AGENTRING_VOICE_PROVIDER": PROVIDER.name})
 
     async def run():
         deadline = time.time() + 20

@@ -38,7 +38,7 @@ client's MCP tool timeout if it has a short one (Codex: 60 s, opencode: 30 s).
 |---|---|
 | `send_message(text, reply_to?)` | Sends a message to the phone (a notification you can reply to inline). Returns `msg_id`. |
 | `get_replies(wait_s?)` | Your new replies, each one returned once. `wait_s` waits up to that long for one (max 3600). |
-| `call(reason, context?, urgent?)` | The phone rings. When you answer, the voice AI says why it's calling, talks with you, and hangs up when you're done. Returns the transcript, how long the call lasted, why it ended and which tools were used. Blocks until the call ends. Needs the `[voice]` extra and `GEMINI_API_KEY`. |
+| `call(reason, context?, urgent?)` | The phone rings. When you answer, the voice AI says why it's calling, talks with you, and hangs up when you're done. Returns the transcript, how long the call lasted, why it ended and which tools were used. Blocks until the call ends. Needs the `[voice]` extra and the voice provider's key (`GEMINI_API_KEY` by default; `AGENTRING_VOICE_PROVIDER` picks another, see [voice.md](voice.md#providers)). |
 | `status()` | Whether the relay is reachable and which phones are paired. |
 
 `context` is everything the voice AI knows about the agent's work: put in it what

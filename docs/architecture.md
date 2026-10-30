@@ -182,7 +182,7 @@ CI fails if generated code is stale or a fixture doesn't round-trip.
 |---|---|---|---|---|
 | **M1** | pairing, devices, messages, events + WS, FCM, SQLite | `pair`, `msg`, `replies`, `status`, `devices`, `serve` (relay sync only) | onboarding (notifications), QR pairing, FCM, messages thread, notification reply, settings | compose: caddy + relay |
 | **M2** | calls, ring timer, LiveKit rooms/tokens, webhook | `call`, worker in echo/tone mode | ConnectionService, CallStyle + FSI, DnD/alarm for urgent, LiveKit audio, call screen, full onboarding | + livekit |
-| **M3** | — | Gemini Live / OpenAI Realtime, `consult_agent`, `end_call`, transcripts + summaries, `--wait` | live transcript | — |
+| **M3** | — | Gemini Live / OpenAI Realtime (+ Grok Voice, Phonic), `consult_agent`, `end_call`, transcripts + summaries, `--wait` | live transcript | — |
 | **M4** | inbound calls, missed/declined | auto-accept inbound, missed → `msg.new` fallback | "Call agent", missed/declined UX | — |
 | **M5** | — | MCP server, local HTTP API | — | skill, examples, docs, quickstart |
 
@@ -193,6 +193,10 @@ CI fails if generated code is stale or a fixture doesn't round-trip.
   worker) and talks to the model's realtime WebSocket API directly through a small
   `RealtimeBackend` interface. Fewer dependencies (supply-chain policy) and full control
   of turn-taking, group-call mixing and tools. Details in [voice.md](voice.md).
+- **More voice providers** (M3, at the user's request, issue #12): besides Gemini Live
+  and OpenAI Realtime, Grok Voice (xAI, same protocol as OpenAI) and Phonic, each one
+  `RealtimeBackend` class. One setting picks it for the CLI and the MCP server alike
+  (`--provider` / `AGENTRING_VOICE_PROVIDER`); Gemini stays the default for its free tier.
 - **MCP server without the `mcp` SDK, stdio only** (M5, at the user's request):
   `agentring mcp` is a small JSON-RPC loop over stdin/stdout (`mcp_server.py`) with
   the tools `send_message`, `get_replies`, `call` and `status`; no new dependencies,

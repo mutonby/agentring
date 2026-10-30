@@ -59,7 +59,7 @@ Copy-paste setup for each: [docs/agents.md](docs/agents.md#recipes-by-harness).
 ```
  your agent ──MCP/CLI──▶ daemon ──WSS (outbound only)──▶ relay ──FCM push──▶ Android app
      ▲                     │                      (your server)                   │
-     └── agents.yaml ◀── voice AI (Gemini Live) ◀───── LiveKit (call audio) ───────┘
+     └── agents.yaml ◀── voice AI (realtime) ◀──────── LiveKit (call audio) ───────┘
 ```
 
 - **relay** (TypeScript): pairing, messages, call state, push, LiveKit tokens. Runs on
@@ -69,8 +69,19 @@ Copy-paste setup for each: [docs/agents.md](docs/agents.md#recipes-by-harness).
   to your agents, behind NAT is fine.
 - **Android app** (Kotlin): QR pairing, the native call screen, messages.
 
-The voice AI is the voice, your agent is the brain: Gemini Live handles the
-conversation in real time and hands real work to your agents.
+The voice AI is the voice, your agent is the brain: a realtime speech model handles
+the conversation and hands real work to your agents. Pick the one you like:
+
+| Voice AI | `--provider` | Key |
+|---|---|---|
+| [Gemini Live](https://ai.google.dev/gemini-api/docs/live) (default, free tier) | `gemini` | `GEMINI_API_KEY` |
+| [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) | `openai` | `OPENAI_API_KEY` |
+| [Grok Voice](https://docs.x.ai/docs/guides/voice/agent) (xAI) | `grok` | `XAI_API_KEY` |
+| [Phonic](https://docs.phonic.ai) | `phonic` | `PHONIC_API_KEY` |
+
+Set `AGENTRING_VOICE_PROVIDER` in `~/.agentring/.env` to use one for every call, from the
+CLI and from MCP. How they compare (latency, tool use) and how to add another one:
+[docs/voice.md](docs/voice.md#providers).
 
 More: [architecture](docs/architecture.md) · [protocol](docs/protocol.md) ·
 [voice AI](docs/voice.md)
@@ -81,7 +92,8 @@ You need:
 - somewhere to run the relay: a Linux server with Docker and a domain name, **or** your own
   computer with Docker (the phone on the same Wi-Fi, or anywhere over Tailscale),
 - a free Firebase project, which is what makes a locked phone ring ([docs/firebase.md](docs/firebase.md)),
-- a Gemini API key for the voice AI ([free tier](https://aistudio.google.com/apikey)),
+- a key for the voice AI: Gemini ([free tier](https://aistudio.google.com/apikey)), or OpenAI,
+  xAI (Grok) or Phonic ([providers](docs/voice.md#providers)),
 - an Android phone.
 
 ```bash
@@ -97,8 +109,8 @@ uv tool install './daemon[voice]'
 agentring init --relay https://relay.example.com --api-key ak_...
 agentring pair                         # scan the QR code with the app
 agentring msg "hello"                  # the phone gets a notification
-echo GEMINI_API_KEY=... >> ~/.agentring/.env
-agentring call "Testing agentring" --ai
+echo GEMINI_API_KEY=... >> ~/.agentring/.env  # or OPENAI_API_KEY / XAI_API_KEY / PHONIC_API_KEY
+agentring call "Testing agentring" --ai       # + --provider openai|grok|phonic
 
 # 3. Your agent (Claude Code here; others: docs/agents.md)
 claude mcp add agentring -- agentring mcp
@@ -114,8 +126,8 @@ vendor's battery saver: [docs/troubleshooting-oem.md](docs/troubleshooting-oem.m
 Everything runs on your own servers and accounts. Messages and call metadata are stored
 on your relay. Push notifications go through your own Firebase project; they are
 signed, not encrypted, so Google's FCM can read pushed text. Call audio goes through
-your LiveKit server and, with the voice AI, to Gemini; on Google's free tier, Google may
-use that data to improve its products.
+your LiveKit server and, with the voice AI, to the provider you chose (Google, OpenAI,
+xAI or Phonic); on Google's free tier, Google may use that data to improve its products.
 
 Over the phone, the voice AI acts on what it hears, so give it only the tools and
 agents you'd trust someone holding your phone with. Details and the threat model:
@@ -125,8 +137,8 @@ agents you'd trust someone holding your phone with. Details and the threat model
 
 - Android only (no iOS yet).
 - One user per relay: no accounts.
-- The voice AI uses Gemini Live; other realtime backends plug in through
-  [`RealtimeBackend`](docs/voice.md).
+- The voice AI needs a cloud realtime model (Gemini, OpenAI, Grok or Phonic); others,
+  local ones included, plug in through [`RealtimeBackend`](docs/voice.md#backends).
 
 ## Development
 
