@@ -31,10 +31,28 @@ declare module "fastify" {
 
 type Kind = Principal["kind"];
 
+/** The subprotocol a browser WebSocket offers next to `bearer.<token>`; the relay selects it. */
+export const WS_SUBPROTOCOL = "agentring.v1";
+const BEARER_SUBPROTOCOL = "bearer.";
+
+/**
+ * The request's credentials as an `Authorization` value. Browsers can't set
+ * headers on a WebSocket, so an upgrade may carry the token as the
+ * `bearer.<token>` subprotocol instead; the header wins when both are present.
+ */
+function authorizationOf(req: FastifyRequest): string | undefined {
+  if (req.headers.authorization !== undefined || req.headers.upgrade?.toLowerCase() !== "websocket") {
+    return req.headers.authorization;
+  }
+  const offered = req.headers["sec-websocket-protocol"]?.split(",").map((s) => s.trim()) ?? [];
+  const token = offered.find((s) => s.startsWith(BEARER_SUBPROTOCOL))?.slice(BEARER_SUBPROTOCOL.length);
+  return token ? `Bearer ${token}` : undefined;
+}
+
 /** Fastify preHandler that authenticates and restricts to the given principal kinds. */
 export function requireAuth(ctx: Ctx, ...kinds: Kind[]) {
   return async (req: FastifyRequest) => {
-    const p = await ctx.auth.authenticate(req.headers.authorization);
+    const p = await ctx.auth.authenticate(authorizationOf(req));
     if (!kinds.includes(p.kind)) throw forbidden(`This endpoint is not available to ${p.kind} credentials`);
     req.principal = p;
   };

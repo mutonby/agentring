@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>agentring</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>agentring</h1>
+      <span id="link" class="link" hidden></span>
+    </header>
+
+    <p id="insecure" class="banner warn" hidden>
+      Browsers only allow the microphone on HTTPS pages (or localhost). Open this page over HTTPS to talk on calls.
+    </p>
+
+    <!-- Pairing: the code printed by `agentring pair` -->
+    <section id="pair" hidden>
+      <h2>Pair this browser</h2>
+      <p class="muted">Run <code>agentring pair</code> on the computer where your agent runs and paste the pairing code it prints.</p>
+      <form id="pair-form">
+        <label for="pair-code">Pairing code</label>
+        <textarea id="pair-code" rows="3" spellcheck="false" autocomplete="off" required
+                  placeholder='{"v":1,"relay_url":"…","pairing_token":"pt_…"}'></textarea>
+        <label for="pair-name">Name for this browser</label>
+        <input id="pair-name" maxlength="64" required>
+        <button type="submit" class="primary">Pair</button>
+        <p id="pair-error" class="error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <!-- Home: the agent, calling it, joining a call in progress -->
+    <section id="home" hidden>
+      <div class="agent">
+        <div class="avatar" id="home-avatar"></div>
+        <div>
+          <div class="agent-name" id="home-agent"></div>
+          <div class="presence"><span id="presence-dot" class="dot"></span><span id="presence"></span></div>
+        </div>
+      </div>
+      <div id="join-offer" class="banner" hidden>
+        <span id="join-text"></span>
+        <button id="join" class="primary small">Join</button>
+      </div>
+      <button id="call-agent" class="primary wide">Call agent</button>
+      <p id="home-notice" class="notice" role="status" hidden></p>
+      <p class="muted small-print">
+        This tab rings while it is open. Calls arrive over the relay's WebSocket; there is no push, so a closed
+        tab can't ring (use the Android app for that).
+      </p>
+      <footer>
+        <span id="device-name" class="muted"></span>
+        <span class="actions">
+          <button id="notify" class="link-button" hidden>Enable notifications</button>
+          <button id="unpair" class="link-button">Forget this browser</button>
+        </span>
+      </footer>
+    </section>
+
+    <!-- The call -->
+    <section id="call" hidden>
+      <div class="avatar big" id="call-avatar"></div>
+      <div class="agent-name" id="call-agent-name"></div>
+      <div class="call-status" id="call-status" role="status"></div>
+      <p class="reason" id="call-reason" hidden></p>
+      <p class="muted" id="call-people" hidden></p>
+      <p class="banner warn" id="call-mic" hidden>No microphone: you can listen, but the others can't hear you.</p>
+      <button id="start-audio" class="secondary" hidden>Click to hear the call</button>
+      <div class="controls" id="ringing-controls" hidden>
+        <button id="decline" class="round danger" aria-label="Decline">Decline</button>
+        <button id="answer" class="round ok" aria-label="Answer">Answer</button>
+      </div>
+      <div class="controls" id="active-controls" hidden>
+        <button id="mute" class="round secondary" aria-pressed="false">Mute</button>
+        <button id="hangup" class="round danger">Hang up</button>
+      </div>
+    </section>
+
+    <div id="audio" hidden></div>
+  </main>
+</body>
+</html>

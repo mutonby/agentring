@@ -24,7 +24,7 @@ export function deviceFromRow(r: DeviceRow): Device {
   return {
     device_id: r.device_id,
     name: r.name,
-    platform: "android",
+    platform: r.platform === "web" ? "web" : "android",
     ...(r.app_version ? { app_version: r.app_version } : {}),
     created_at: r.created_at,
     ...(r.last_seen_at ? { last_seen_at: r.last_seen_at } : {}),
@@ -82,7 +82,7 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
             pairing_token: { type: "string", maxLength: 128 },
             fcm_token: { type: "string", maxLength: 4096 },
             device_name: { type: "string", minLength: 1, maxLength: 64 },
-            platform: { type: "string", enum: ["android"] },
+            platform: { type: "string", enum: ["android", "web"] },
             app_version: { type: "string", maxLength: 32 },
           },
         },

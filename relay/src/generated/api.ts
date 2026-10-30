@@ -411,6 +411,12 @@ export interface paths {
          *     then live events. Clients send nothing (ping/pong keepalive every 20 s).
          *     Close codes: 4401 unauthorized/revoked, 4409 replaced by a newer agent
          *     connection (only one daemon socket at a time).
+         *
+         *     Browsers cannot set `Authorization` on a WebSocket. They offer the
+         *     subprotocols `agentring.v1` and `bearer.<token>` instead
+         *     (`Sec-WebSocket-Protocol: agentring.v1, bearer.eyJ…`); the relay reads
+         *     the token from the second one and selects `agentring.v1`. The header
+         *     wins when both are present.
          */
         get: operations["eventStream"];
         put?: never;
@@ -505,8 +511,11 @@ export interface components {
             /** @description May be omitted if not yet available; send later via /v1/device/fcm. */
             fcm_token?: string;
             device_name: string;
-            /** @enum {string} */
-            platform: "android";
+            /**
+             * @description `web` = the browser client served by the relay at `/web/` (no push: it only rings while open).
+             * @enum {string}
+             */
+            platform: "android" | "web";
             app_version?: string;
         };
         PairResponse: {
@@ -540,7 +549,7 @@ export interface components {
             device_id: components["schemas"]["DeviceId"];
             name: string;
             /** @enum {string} */
-            platform: "android";
+            platform: "android" | "web";
             app_version?: string;
             created_at: components["schemas"]["Timestamp"];
             last_seen_at?: components["schemas"]["Timestamp"];

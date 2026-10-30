@@ -9,7 +9,7 @@
 | Principal | Credential | Header |
 |---|---|---|
 | **agent** (the daemon) | API key `ak_…` (random 32 bytes, base64url) | `Authorization: Bearer ak_…` |
-| **device** (the phone) | `device_jwt` (HS256, `iss`=`relay_id`, `sub`=`device_id`, `aud`=`device`) | `Authorization: Bearer eyJ…` |
+| **device** (the phone, or a browser) | `device_jwt` (HS256, `iss`=`relay_id`, `sub`=`device_id`, `aud`=`device`) | `Authorization: Bearer eyJ…` |
 | LiveKit server | LiveKit webhook signature | `Authorization: <livekit jwt>` |
 
 The relay tells credentials apart by prefix (`ak_`) vs JWT shape. TLS is
@@ -80,7 +80,11 @@ value return the original message (idempotency for flaky mobile networks).
 
 ### WebSocket (event stream)
 
-`GET /v1/ws?after_seq=<n>` with the usual `Authorization` header.
+`GET /v1/ws?after_seq=<n>` with the usual `Authorization` header. Browsers
+can't set that header on a WebSocket, so they offer two subprotocols instead,
+`agentring.v1` and `bearer.<token>`; the relay reads the token from the second
+and selects `agentring.v1` (never echoing the token). The header wins when both
+are present, and the subprotocol is only read on upgrade requests.
 
 1. Server sends `ws.hello`.
 2. Server replays every persisted event visible to the principal with
@@ -169,6 +173,11 @@ app scans QR
 app stores device_jwt + push_secret (SecretStore: AES-GCM with an Android Keystore key)
 FirebaseMessagingService.onNewToken → POST /v1/device/fcm { fcm_token }
 ```
+
+The browser client (`/web/`, see [web-client.md](web-client.md)) pairs the same
+way from the pasted `qr_payload`, with `platform: "web"` and no `fcm_token`: the
+relay never pushes to it, and it gets every event from the WebSocket while the tab
+is open.
 
 `agentring pair` polls `GET /v1/devices` (or listens on WS) and prints
 "Paired with Pixel 8 ✅".

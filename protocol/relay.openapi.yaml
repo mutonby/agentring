@@ -523,6 +523,12 @@ paths:
         then live events. Clients send nothing (ping/pong keepalive every 20 s).
         Close codes: 4401 unauthorized/revoked, 4409 replaced by a newer agent
         connection (only one daemon socket at a time).
+
+        Browsers cannot set `Authorization` on a WebSocket. They offer the
+        subprotocols `agentring.v1` and `bearer.<token>` instead
+        (`Sec-WebSocket-Protocol: agentring.v1, bearer.eyJ…`); the relay reads
+        the token from the second one and selects `agentring.v1`. The header
+        wins when both are present.
       security: [{ agentKey: [] }, { deviceJwt: [] }]
       parameters:
         - $ref: "#/components/parameters/AfterSeq"
@@ -713,7 +719,10 @@ components:
           type: string
           maxLength: 4096
         device_name: { type: string, minLength: 1, maxLength: 64 }
-        platform: { type: string, enum: [android] }
+        platform:
+          description: "`web` = the browser client served by the relay at `/web/` (no push: it only rings while open)."
+          type: string
+          enum: [android, web]
         app_version: { type: string, maxLength: 32 }
     PairResponse:
       type: object
@@ -753,7 +762,7 @@ components:
       properties:
         device_id: { $ref: "#/components/schemas/DeviceId" }
         name: { type: string }
-        platform: { type: string, enum: [android] }
+        platform: { type: string, enum: [android, web] }
         app_version: { type: string }
         created_at: { $ref: "#/components/schemas/Timestamp" }
         last_seen_at: { $ref: "#/components/schemas/Timestamp" }

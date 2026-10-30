@@ -7,6 +7,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund --ignore-scripts
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts ./scripts
+COPY web ./web
+# The build also copies the pinned LiveKit browser SDK into web/vendor/ (browser client).
 RUN npm run build && npm prune --omit=dev --ignore-scripts
 
 FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
@@ -19,6 +22,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
 WORKDIR /app
 COPY --from=build --chown=root:root /app/node_modules ./node_modules
 COPY --from=build --chown=root:root /app/dist ./dist
+COPY --from=build --chown=root:root /app/web ./web
 COPY --chown=root:root package.json ./
 # Code owned by root and not writable by the process; only /data belongs to it.
 USER node

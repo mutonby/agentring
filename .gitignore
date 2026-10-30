@@ -27,3 +27,6 @@ uv.lock.bak
 !.env.local.example
 service-account*.json
 *-firebase-adminsdk-*.json
+
+# Copied from node_modules by `npm run build` (relay/scripts/vendor-web.mjs)
+relay/web/vendor/

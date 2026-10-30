@@ -5,7 +5,7 @@ import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { Auth } from "./auth.js";
 import { type Config, dbPath } from "./config.js";
-import type { Ctx } from "./context.js";
+import { type Ctx, WS_SUBPROTOCOL } from "./context.js";
 import { type Db, metaOrInit, openDatabase } from "./db/database.js";
 import { ApiError } from "./errors.js";
 import { EventLog } from "./events.js";
@@ -19,6 +19,7 @@ import { Calls, callRoutes, targetsOf } from "./routes/calls.js";
 import { messageRoutes } from "./routes/messages.js";
 import { pairingRoutes } from "./routes/pairing.js";
 import { systemRoutes } from "./routes/system.js";
+import { webRoutes } from "./routes/web.js";
 import { WsHub, wsRoutes } from "./routes/ws.js";
 
 export interface BuildOptions {
@@ -73,7 +74,13 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
     trustProxy: true,
     bodyLimit: 64 * 1024,
   });
-  await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
+  await app.register(websocket, {
+    options: {
+      maxPayload: 64 * 1024,
+      // Browsers send their token as a subprotocol (see requireAuth); never echo that one back.
+      handleProtocols: (offered) => (offered.has(WS_SUBPROTOCOL) ? WS_SUBPROTOCOL : false),
+    },
+  });
 
   const provider: PushProvider | undefined =
     opts.pushProvider ?? (cfg.fcm ? new FcmProvider(cfg.fcm.serviceAccountFile, cfg.fcm.apiBase) : undefined);
@@ -129,6 +136,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   // Fetch the FCM access token now so the first call's push doesn't wait for it.
   void provider?.prepare?.().catch((err: unknown) => app.log.warn({ err }, "push provider warm-up failed"));
   wsRoutes(app, ctx);
+  webRoutes(app, ctx);
 
   app.addHook("onClose", async () => {
     calls.stop();

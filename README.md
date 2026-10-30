@@ -68,6 +68,8 @@ Copy-paste setup for each: [docs/agents.md](docs/agents.md#recipes-by-harness).
 - **daemon** (Python): the `agentring` CLI, the MCP server and the voice AI. Runs next
   to your agents, behind NAT is fine.
 - **Android app** (Kotlin): QR pairing, the native call screen, messages.
+- **Browser client** (served by the relay at `/web/`): answer and place calls from a
+  desktop browser while the tab is open, no app needed ([docs/web-client.md](docs/web-client.md)).
 
 The voice AI is the voice, your agent is the brain: a realtime speech model handles
 the conversation and hands real work to your agents. Pick the one you like:
@@ -84,7 +86,7 @@ CLI and from MCP. How they compare (latency, tool use) and how to add another on
 [docs/voice.md](docs/voice.md#providers).
 
 More: [architecture](docs/architecture.md) · [protocol](docs/protocol.md) ·
-[voice AI](docs/voice.md)
+[voice AI](docs/voice.md) · [browser client](docs/web-client.md)
 
 ## Quickstart
 
