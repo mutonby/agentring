@@ -28,7 +28,10 @@ updates:
     directory: /app-android
     schedule: {interval: weekly}
     cooldown: {default-days: 14}
-    ignore: [{dependency-name: "*", update-types: ["version-update:semver-major"]}]
+    # androidx.core >= 1.17 needs a newer compileSdk / AGP than the app uses; bump those by hand first.
+    ignore:
+      - {dependency-name: "*", update-types: ["version-update:semver-major"]}
+      - {dependency-name: "androidx.core:core-ktx", versions: [">= 1.17"]}
     groups: {android: {patterns: ["*"]}}
 
   - package-ecosystem: docker-compose
