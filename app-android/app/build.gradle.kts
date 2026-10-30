@@ -104,6 +104,8 @@ dependencies {
     implementation(project(":core"))
 
     implementation(libs.androidx.core.ktx)
+    // Espresso 3.7 needs 1.2.0; the app's own graph resolves 1.1.0 and Kotlin 2.4 makes the test classpath match it.
+    implementation(libs.androidx.concurrent.futures)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.process)
