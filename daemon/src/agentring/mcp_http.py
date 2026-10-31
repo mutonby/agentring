@@ -159,6 +159,14 @@ class UpstreamError(Exception):
     """The hub admin API or the relay can't answer right now."""
 
 
+def _error_code(r: httpx.Response) -> str | None:
+    """The relay's `{"error": {"code"}}`, if the response carries one."""
+    try:
+        return str(r.json()["error"]["code"])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
 class KeyResolver:
     """API key → Tenant. Hub mode asks the admin API; self-hosted mode checks the key against
     the one relay (`GET /v1/status`). Positive answers are cached for `ttl_s`, keyed by a hash
@@ -210,7 +218,7 @@ class KeyResolver:
         except httpx.HTTPError as e:
             log.warning("hub admin API unreachable: %s", type(e).__name__)
             raise UpstreamError("hub unreachable") from None
-        if r.status_code == 404:
+        if r.status_code == 404 or _error_code(r) == "tenant_disabled":
             raise Unauthorized()
         if r.status_code in (401, 403):
             log.error("hub admin API rejected the admin token (HTTP %d)", r.status_code)

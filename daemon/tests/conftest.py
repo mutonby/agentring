@@ -66,3 +66,44 @@ def agentring_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("AGENTRING_RELAY_URL", raising=False)
     monkeypatch.delenv("AGENTRING_API_KEY", raising=False)
     return home
+
+
+HUB_ADMIN_TOKEN = "hub-admin-token-" + "y" * 32
+
+
+@pytest.fixture()
+def hub(tmp_path: Path):
+    """A real relay in hub mode (docs/cloud.md); yields its URL. Tenants come from the admin API."""
+    if not RELAY_DIST.exists():
+        pytest.skip("relay not built (cd relay && npm run build)")
+    port = _free_port()
+    url = f"http://127.0.0.1:{port}"
+    env = {
+        **{k: v for k, v in os.environ.items() if not k.startswith("AGENTRING_")},
+        "PORT": str(port),
+        "HOST": "127.0.0.1",
+        "AGENTRING_HUB": "1",
+        "AGENTRING_HUB_ADMIN_TOKEN": HUB_ADMIN_TOKEN,
+        "AGENTRING_PUBLIC_URL": url,
+        "AGENTRING_INSECURE_DEV": "1",
+        "AGENTRING_DATA_DIR": str(tmp_path / "hub-data"),
+    }
+    proc = subprocess.Popen(
+        ["node", "--disable-warning=ExperimentalWarning", str(RELAY_DIST)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        try:
+            if httpx.get(f"{url}/healthz").status_code == 200:
+                break
+        except httpx.HTTPError:
+            time.sleep(0.1)
+    else:
+        proc.kill()
+        raise RuntimeError("hub did not start: " + proc.stdout.read().decode())
+    yield url
+    proc.terminate()
+    proc.wait(5)
