@@ -207,3 +207,9 @@ CI fails if generated code is stale or a fixture doesn't round-trip.
   A slow agent's answer reaches the call as a note, or the phone as a message once
   the call is over.
 
+- **agentring cloud: hub mode** (at the user's request, 2026-11-01): the relay can host
+  many isolated tenants (`AGENTRING_HUB=1`), each a full relay instance with its own
+  SQLite file under `/t/{tenant_id}`, plus an admin API for a control plane and
+  per-tenant limits (`402 quota_exceeded`, `end_reason: quota`). This lifts F1's "one
+  user, no accounts" for the hosted version only; self-hosted is unchanged. The control
+  plane (accounts, billing) lives in a private repo. Details in [cloud.md](cloud.md).

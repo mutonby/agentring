@@ -103,6 +103,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PairResponse" }
+        "402": { $ref: "#/components/responses/QuotaExceeded" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -192,6 +193,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CallWithJoin" }
+        "402": { $ref: "#/components/responses/QuotaExceeded" }
         "400":
           description: "`invalid_request`, e.g. a missing `reason` (agent caller), an empty `device_ids`, an unknown or revoked device id, or `device_ids` sent by a device."
           content:
@@ -412,6 +414,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Message" }
+        "402": { $ref: "#/components/responses/QuotaExceeded" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     get:
@@ -605,6 +608,13 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    QuotaExceeded:
+      description: >-
+        `quota_exceeded`: only on a hosted relay (hub mode, docs/cloud.md), when the
+        tenant's plan limit for devices, call minutes or messages is reached.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
 
   schemas:
     # ---------- primitives ----------
@@ -645,7 +655,7 @@ components:
       enum: [ringing, active, ended, missed, declined, canceled]
     EndReason:
       type: string
-      enum: [hangup, canceled, room_closed, error]
+      enum: [hangup, canceled, room_closed, error, quota]
 
     Error:
       type: object
@@ -657,7 +667,7 @@ components:
           properties:
             code:
               type: string
-              examples: [invalid_request, unauthorized, invalid_pairing_token, forbidden, not_found, busy, no_devices, agent_offline, calls_unavailable, invalid_state, call_ended, rate_limited, internal]
+              examples: [invalid_request, unauthorized, invalid_pairing_token, forbidden, not_found, busy, no_devices, agent_offline, calls_unavailable, invalid_state, call_ended, rate_limited, quota_exceeded, tenant_disabled, internal]
             message: { type: string }
 
     # ---------- system ----------

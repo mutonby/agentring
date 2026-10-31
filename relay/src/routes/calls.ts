@@ -4,6 +4,7 @@ import { type Ctx, principal, requireAuth } from "../context.js";
 import { ApiError, forbidden, notFound } from "../errors.js";
 import { newId } from "../ids.js";
 import type { Event, Schemas } from "../protocol.js";
+import { callMsLeft, checkCall } from "../quota.js";
 
 type Call = Schemas["Call"];
 type CallState = Schemas["CallState"];
@@ -58,7 +59,8 @@ export function callFromRow(r: CallRow): Call {
   };
 }
 
-export const roomName = (callId: string) => callId;
+/** LiveKit room of a call; hub mode prefixes it with the tenant (one LiveKit for every tenant). */
+export const roomName = (ctx: Pick<Ctx, "roomPrefix">, callId: string) => ctx.roomPrefix + callId;
 const identityOf = (p: Principal) => (p.kind === "agent" ? "agent" : `device_${p.deviceId}`);
 /** Which side placed the call. */
 const callerKind = (d: Direction) => (d === "agent_to_user" ? "agent" : "device");
@@ -89,6 +91,8 @@ export class Calls {
   private readonly timers = new Map<string, NodeJS.Timeout>();
   /** Devices that already reported `ringing`, so the event is emitted once per device. */
   private readonly ringingDevices = new Map<string, Set<string>>();
+  /** Hub mode: ends an active call when the tenant's call minutes run out. */
+  private readonly quotaTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly ctx: Ctx) {}
 
@@ -105,7 +109,10 @@ export class Calls {
   /** After a restart: time out calls that expired while we were down and re-arm the others. */
   resume(): void {
     const open = this.ctx.db.prepare("SELECT * FROM calls WHERE state IN ('ringing','active')").all() as unknown as CallRow[];
-    for (const c of open) this.armTimer(c);
+    for (const c of open) {
+      this.armTimer(c);
+      if (c.state === "active") this.armQuota(c.call_id);
+    }
   }
 
   private part(callId: string, deviceId: string): PartState | undefined {
@@ -135,8 +142,24 @@ export class Calls {
   }
 
   stop(): void {
-    for (const t of this.timers.values()) clearTimeout(t);
+    for (const t of [...this.timers.values(), ...this.quotaTimers.values()]) clearTimeout(t);
     this.timers.clear();
+    this.quotaTimers.clear();
+  }
+
+  /** The call just became active: if the tenant has a call-time limit, end the call when it runs out. */
+  private armQuota(callId: string): void {
+    const left = callMsLeft(this.ctx.db, this.ctx.limits());
+    if (left === undefined || this.quotaTimers.has(callId)) return;
+    const t = setTimeout(() => {
+      this.quotaTimers.delete(callId);
+      // The limit may have been raised meanwhile (e.g. an upgrade): check again.
+      const again = callMsLeft(this.ctx.db, this.ctx.limits());
+      if (again === undefined || again >= 1000) return this.armQuota(callId);
+      this.finish(callId, "active", "ended", "relay", "quota");
+    }, left);
+    t.unref();
+    this.quotaTimers.set(callId, t);
   }
 
   /** Whether a device may see this event; events of a targeted call only reach its phones. */
@@ -160,6 +183,7 @@ export class Calls {
       throw new ApiError(503, "agent_offline", "The agent is not connected");
     }
     if (this.open()) throw new ApiError(409, "busy", "Another call is ringing or active");
+    checkCall(this.ctx.db, this.ctx.limits());
 
     const now = Date.now();
     const row: CallRow = {
@@ -256,6 +280,7 @@ export class Calls {
       .run(now, callId);
     if (res.changes !== 1) throw invalidState(this.get(callId)!.state);
     this.settle(callId);
+    this.armQuota(callId);
     this.ctx.events.emit({ type: "call.accept", call_id: callId, by: "agent" });
     return this.get(callId)!;
   }
@@ -287,6 +312,7 @@ export class Calls {
       this.ctx.db
         .prepare("UPDATE calls SET state = 'active', answered_at = ?, device_id = ? WHERE call_id = ? AND state = 'ringing'")
         .run(Date.now(), deviceId, c.call_id);
+      this.armQuota(c.call_id);
     }
     this.setPart(c.call_id, deviceId, "joined");
     this.ringingDevices.get(c.call_id)?.delete(deviceId);
@@ -390,6 +416,8 @@ export class Calls {
       .run(to, now, by, reason, callId, from);
     if (res.changes !== 1) return undefined;
     this.settle(callId);
+    clearTimeout(this.quotaTimers.get(callId));
+    this.quotaTimers.delete(callId);
     const row = this.get(callId)!;
     this.ctx.events.emit({
       type: "call.end",
@@ -449,7 +477,7 @@ export class Calls {
   private closeRoom(callId: string): void {
     const lk = this.ctx.livekit;
     if (!lk) return;
-    lk.deleteRoom(roomName(callId)).catch(() => undefined);
+    lk.deleteRoom(roomName(this.ctx, callId)).catch(() => undefined);
   }
 }
 
@@ -470,7 +498,7 @@ export function callRoutes(app: FastifyInstance, ctx: Ctx, calls: Calls): void {
     return ctx.livekit;
   };
   const joinFor = (callId: string, p: Principal) =>
-    livekit().join(roomName(callId), identityOf(p), p.kind === "agent" ? ctx.cfg.agentName : "user");
+    livekit().join(roomName(ctx, callId), identityOf(p), p.kind === "agent" ? ctx.cfg.agentName : "user");
 
   app.post<{ Body: Schemas["CreateCallRequest"] }>(
     "/v1/calls",
@@ -500,7 +528,7 @@ export function callRoutes(app: FastifyInstance, ctx: Ctx, calls: Calls): void {
       const row = calls.create(p, req.body ?? {});
       // The push is already on its way; create the room and the caller's token meanwhile.
       const [, join] = await Promise.all([
-        lk.createRoom(roomName(row.call_id)).catch((err: unknown) => req.log.warn({ err }, "could not pre-create room")),
+        lk.createRoom(roomName(ctx, row.call_id)).catch((err: unknown) => req.log.warn({ err }, "could not pre-create room")),
         joinFor(row.call_id, p),
       ]);
       req.log.info({ call: row.call_id, direction: row.direction, priority: row.priority }, "call created");
@@ -605,7 +633,7 @@ export function callRoutes(app: FastifyInstance, ctx: Ctx, calls: Calls): void {
         throw new ApiError(401, "unauthorized", "Bad webhook signature");
       }
       const room = event.room?.name;
-      const c = room ? calls.get(room) : undefined;
+      const c = room?.startsWith(ctx.roomPrefix) ? calls.get(room.slice(ctx.roomPrefix.length)) : undefined;
       if (c?.state === "active") {
         const identity = event.participant?.identity ?? "";
         const left = event.event === "participant_left";

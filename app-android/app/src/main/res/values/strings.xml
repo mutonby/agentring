@@ -12,7 +12,8 @@
     <string name="allow">Allow</string>
     <string name="skip">Skip</string>
     <string name="pair_title">Pair with your agent</string>
-    <string name="pair_body">On your computer run <b>agentring pair</b> and scan the QR code, or paste the pairing code it prints.</string>
+    <string name="pair_body">Scan the QR code from your agentring dashboard, or from <b>agentring pair</b> on your own server. You can also paste the pairing code.</string>
+    <string name="use_cloud">No server? Use agentring cloud</string>
     <string name="scan_qr">Scan QR code</string>
     <string name="or_paste">or paste the pairing code</string>
     <string name="pairing_code">Pairing code</string>

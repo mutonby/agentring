@@ -49,6 +49,18 @@ export class WsHub {
     if (set?.size === 0) this.devices.delete(deviceId);
   }
 
+  /** Closes the agent's socket, e.g. after its API key was rotated. */
+  disconnectAgent(): void {
+    this.agent?.close(CLOSE_UNAUTHORIZED, "API key rotated");
+  }
+
+  /** Open sockets (agent and devices); hub mode keeps a tenant loaded while it has any. */
+  socketCount(): number {
+    let n = this.agent ? 1 : 0;
+    for (const set of this.devices.values()) n += set.size;
+    return n;
+  }
+
   disconnectDevice(deviceId: string): void {
     for (const ws of this.devices.get(deviceId) ?? []) ws.close(CLOSE_UNAUTHORIZED, "device revoked");
   }

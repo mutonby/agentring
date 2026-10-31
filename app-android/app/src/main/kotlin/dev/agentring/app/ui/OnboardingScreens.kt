@@ -1,7 +1,9 @@
 package dev.agentring.app.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -48,6 +50,7 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import dev.agentring.app.BuildConfig
 import dev.agentring.app.Graph
 import dev.agentring.app.R
 import dev.agentring.app.data.Pairing
@@ -178,6 +181,13 @@ private fun PairStep(onPaired: () -> Unit) {
         enabled = code.isNotBlank() && !busy,
         modifier = Modifier.fillMaxWidth().testTag("pair_button"),
     ) { Text(stringResource(R.string.pair)) }
+
+    if (BuildConfig.CLOUD_URL.isNotEmpty()) {
+        TextButton(
+            onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.CLOUD_URL))) },
+            modifier = Modifier.testTag("use_cloud"),
+        ) { Text(stringResource(R.string.use_cloud)) }
+    }
 
     if (busy) {
         CircularProgressIndicator()

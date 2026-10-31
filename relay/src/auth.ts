@@ -10,16 +10,15 @@ export function sha256(s: string): Buffer {
 }
 
 export class Auth {
-  private readonly apiKeyHash: Buffer;
   private readonly jwtKey: Uint8Array;
 
+  /** `apiKeyHash` returns the SHA-256 of the current agent API key (it may change: hub mode rotates keys). */
   constructor(
     private readonly db: Db,
-    apiKey: string,
+    private readonly apiKeyHash: () => Buffer,
     jwtSecret: string,
     private readonly relayId: string,
   ) {
-    this.apiKeyHash = sha256(apiKey);
     this.jwtKey = Buffer.from(jwtSecret, "base64url");
   }
 
@@ -40,7 +39,7 @@ export class Auth {
     const token = m[1]!;
 
     if (token.startsWith("ak_")) {
-      if (timingSafeEqual(sha256(token), this.apiKeyHash)) return { kind: "agent" };
+      if (timingSafeEqual(sha256(token), this.apiKeyHash())) return { kind: "agent" };
       throw unauthorized();
     }
 

@@ -446,7 +446,7 @@ export interface components {
         /** @enum {string} */
         CallState: "ringing" | "active" | "ended" | "missed" | "declined" | "canceled";
         /** @enum {string} */
-        EndReason: "hangup" | "canceled" | "room_closed" | "error";
+        EndReason: "hangup" | "canceled" | "room_closed" | "error" | "quota";
         Error: {
             error: {
                 /**
@@ -462,6 +462,8 @@ export interface components {
                  * @example invalid_state
                  * @example call_ended
                  * @example rate_limited
+                 * @example quota_exceeded
+                 * @example tenant_disabled
                  * @example internal
                  */
                 code: string;
@@ -865,6 +867,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description `quota_exceeded`: only on a hosted relay (hub mode, docs/cloud.md), when the tenant's plan limit for devices, call minutes or messages is reached. */
+        QuotaExceeded: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: {
         DeviceId: components["schemas"]["DeviceId"];
@@ -975,6 +986,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            402: components["responses"]["QuotaExceeded"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -1110,6 +1122,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            402: components["responses"]["QuotaExceeded"];
             /** @description `busy` (another call is ringing/active) or `no_devices` (agent caller, nothing paired). */
             409: {
                 headers: {
@@ -1382,6 +1395,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            402: components["responses"]["QuotaExceeded"];
         };
     };
     getMessage: {

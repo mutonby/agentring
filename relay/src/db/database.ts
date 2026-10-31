@@ -82,7 +82,8 @@ const MIGRATIONS: string[] = [
 
 export type Db = DatabaseSync;
 
-export function openDatabase(path: string): Db {
+/** Opens (creating if needed) a SQLite database and runs `migrations` it hasn't run yet. */
+export function openDatabase(path: string, migrations: string[] = MIGRATIONS): Db {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
@@ -90,10 +91,10 @@ export function openDatabase(path: string): Db {
   const row = db.prepare("SELECT version FROM schema_version").get() as { version: number } | undefined;
   let version = row?.version ?? 0;
   if (!row) db.prepare("INSERT INTO schema_version (version) VALUES (0)").run();
-  for (; version < MIGRATIONS.length; version++) {
+  for (; version < migrations.length; version++) {
     db.exec("BEGIN");
     try {
-      db.exec(MIGRATIONS[version]!);
+      db.exec(migrations[version]!);
       db.prepare("UPDATE schema_version SET version = ?").run(version + 1);
       db.exec("COMMIT");
     } catch (e) {

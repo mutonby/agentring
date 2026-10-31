@@ -308,6 +308,15 @@ compares the session's join time with the phone's latest join.
 - Live transcript: not implemented yet. The daemon keeps the transcript of AI calls
   (`agentring call --ai --json`, the MCP `call` tool); the app does not show it.
 
+### Hosted relays (hub mode)
+
+A hosted relay (docs/cloud.md) serves each tenant under a base URL with a path,
+`https://host/t/{tenant_id}`; clients append `/v1/...` to it as usual. It may refuse
+`POST /v1/pair`, `/v1/calls` and `/v1/messages` with `402 quota_exceeded` when the
+plan's limit is reached, end an active call with `end_reason: "quota"` when the call
+minutes run out, and answer `403 tenant_disabled` for a disabled account. A
+self-hosted relay never does any of this.
+
 ## Daemon local HTTP API (M5, sketch)
 
 Bound to `127.0.0.1:7878` by default, `Authorization: Bearer <local key>`.

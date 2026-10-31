@@ -39,7 +39,9 @@ file, relay id, JWT secret, API key, event log, calls) mounted under a path:
   the pair response as today) and one LiveKit server. LiveKit room names are
   `{tenant_id}.{call_id}`; the hub receives the LiveKit webhook at
   `/v1/livekit/webhook` and hands it to the tenant named in the room.
-- **Tenants are loaded lazily** on first request and kept in memory.
+- **Tenants are loaded lazily** on first request and unloaded after 15 min without
+  requests, open sockets or open calls. On start the hub loads the tenants that have a
+  ringing or active call, so their timers keep running.
 - **Disabled tenant:** every tenant request gets `403 tenant_disabled`.
 - **No tenant-less API:** `/v1/*` (other than the LiveKit webhook) answers 404 in hub mode.
 
@@ -80,7 +82,7 @@ Tenant  = { tenant_id, base_url, agent_name, limits: Limits, disabled: bool, cre
 | `POST /admin/v1/tenants/{tid}/pairing-tokens` | `{ttl_s?}` | `201 PairingToken` (same shape as `/v1/pairing-tokens`) |
 | `GET /admin/v1/tenants/{tid}/devices` | | `200 {devices: Device[]}` |
 | `DELETE /admin/v1/tenants/{tid}/devices/{device_id}` | | `204` |
-| `POST /admin/v1/resolve-key` | `{api_key}` | `200 {tenant_id, base_url}` or `404 not_found` |
+| `POST /admin/v1/resolve-key` | `{api_key}` | `200 {tenant_id, base_url}`, `404 not_found`, or `403 tenant_disabled` |
 
 ## Remote MCP server
 

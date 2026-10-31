@@ -3,7 +3,7 @@ import { chmodSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
-import { Auth } from "./auth.js";
+import { Auth, sha256 } from "./auth.js";
 import { type Config, dbPath } from "./config.js";
 import type { Ctx } from "./context.js";
 import { type Db, metaOrInit, openDatabase } from "./db/database.js";
@@ -12,6 +12,7 @@ import { EventLog } from "./events.js";
 import { newId, randomToken } from "./ids.js";
 import { LiveKitServer, type LiveKitService } from "./livekit.js";
 import type { PushConfig } from "./protocol.js";
+import { type Limits, UNLIMITED } from "./quota.js";
 import { PushDispatcher } from "./push/dispatcher.js";
 import { FcmProvider } from "./push/fcm.js";
 import type { PushProvider } from "./push/push-provider.js";
@@ -27,11 +28,24 @@ export interface BuildOptions {
   pushProvider?: PushProvider;
   /** Inject LiveKit (tests). Defaults to the configured server, if any. */
   livekit?: LiveKitService;
+  /** A pino-compatible logger to use instead of creating one (hub mode: a child per tenant). */
+  loggerInstance?: FastifyServerOptions["loggerInstance"];
+  /** Set by the hub: this relay is one tenant of a multi-tenant relay (docs/cloud.md). */
+  tenant?: TenantOptions;
+}
+
+export interface TenantOptions {
+  /** SHA-256 of the tenant's current API key (the hub stores only the hash; keys rotate). */
+  apiKeyHash: () => Buffer;
+  limits: () => Limits;
+  /** LiveKit room name prefix, "{tenant_id}.". */
+  roomPrefix: string;
 }
 
 export interface BuiltApp {
   app: FastifyInstance;
   ctx: Ctx;
+  /** Empty in hub mode (the hub holds the key). */
   apiKey: string;
   /** True when the API key was generated on this start (print it once). */
   apiKeyGenerated: boolean;
@@ -66,10 +80,19 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   const db = openDatabase(dbPath(cfg));
   const relayId = metaOrInit(db, "relay_id", () => newId("rly"));
   const jwtSecret = metaOrInit(db, "jwt_secret", () => randomBytes(32).toString("base64url"));
-  const { apiKey, generated } = resolveApiKey(cfg, db);
+  let apiKey = "";
+  let generated = false;
+  let apiKeyHash: () => Buffer;
+  if (opts.tenant) {
+    apiKeyHash = opts.tenant.apiKeyHash;
+  } else {
+    ({ apiKey, generated } = resolveApiKey(cfg, db));
+    const hash = sha256(apiKey);
+    apiKeyHash = () => hash;
+  }
 
   const app = Fastify({
-    logger: opts.logger ?? true,
+    ...(opts.loggerInstance ? { loggerInstance: opts.loggerInstance } : { logger: opts.logger ?? true }),
     trustProxy: true,
     bodyLimit: 64 * 1024,
   });
@@ -78,21 +101,23 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   const provider: PushProvider | undefined =
     opts.pushProvider ?? (cfg.fcm ? new FcmProvider(cfg.fcm.serviceAccountFile, cfg.fcm.apiBase) : undefined);
   const pushConfig: PushConfig = cfg.fcm ? { provider: "fcm", fcm: cfg.fcm.client } : null;
-  if (!provider) app.log.warn("Push is not configured: the phone will only get events while the app is open");
+  if (!provider && !opts.tenant) app.log.warn("Push is not configured: the phone will only get events while the app is open");
 
   const events = new EventLog(db);
   const ctx: Ctx = {
     cfg,
     db,
-    auth: new Auth(db, apiKey, jwtSecret, relayId),
+    auth: new Auth(db, apiKeyHash, jwtSecret, relayId),
     events,
     relayId,
     pushConfig,
     pushProviderName: provider?.name ?? "none",
     hub: new WsHub(events),
     livekit: opts.livekit ?? (cfg.livekit ? new LiveKitServer(cfg.livekit) : undefined),
+    limits: opts.tenant?.limits ?? (() => UNLIMITED),
+    roomPrefix: opts.tenant?.roomPrefix ?? "",
   };
-  if (!ctx.livekit) app.log.warn("LiveKit is not configured: calls are disabled");
+  if (!ctx.livekit && !opts.tenant) app.log.warn("LiveKit is not configured: calls are disabled");
   const calls = new Calls(ctx);
   ctx.calls = calls;
   events.setVisibility((e, p) => calls.eventVisibleTo(e, p));
