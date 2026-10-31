@@ -70,7 +70,8 @@ F1 scope: one user, one agent, Android only, self-hosted, no accounts.
     relay_client.py         # REST (httpx) + WS (websockets) with resume-from-seq
     store.py                # local SQLite mirror + transcripts
     http_api.py             # local HTTP API (Starlette)
-    mcp_server.py           # MCP tools (stdio + streamable HTTP)
+    mcp_server.py           # MCP tools + stdio transport
+    mcp_http.py             # MCP over Streamable HTTP, many users (agentring mcp-http)
     voice/                  # worker, prompts, consult_agent backends   (extra: [voice])
     models.py               # generated from /protocol (datamodel-code-generator, pydantic v2), committed
   tests/
@@ -200,8 +201,12 @@ CI fails if generated code is stale or a fixture doesn't round-trip.
 - **MCP server without the `mcp` SDK, stdio only** (M5, at the user's request):
   `agentring mcp` is a small JSON-RPC loop over stdin/stdout (`mcp_server.py`) with
   the tools `send_message`, `get_replies`, `call` and `status`; no new dependencies,
-  as for the voice side. Streamable HTTP is left out: HTTP-only clients (n8n) use the
-  relay's REST API. Details in [agents.md](agents.md).
+  as for the voice side. Details in [agents.md](agents.md).
+- **Remote MCP server over Streamable HTTP** (for agentring cloud, [cloud.md](cloud.md)):
+  `agentring mcp-http` (`mcp_http.py`) serves the same tools to many users at once,
+  each with their relay API key as bearer token; also without an SDK or web framework
+  (a small HTTP/1.1 server on asyncio streams). Both transports share one tools
+  implementation in `mcp_server.py`.
 - **`agents.yaml`** (M3): the voice AI's tools come from one file — command agents
   (consulted with `consult_agent`, argv lists only) and MCP servers with allowlists.
   A slow agent's answer reaches the call as a note, or the phone as a message once

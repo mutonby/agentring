@@ -1,5 +1,7 @@
 # agentring daemon (CLI + `agentring serve`, with the voice extra), for the optional
 # "daemon" profile in deploy/docker-compose.yml. Dependencies come only from uv.lock.
+# The same image runs the remote MCP server: command `mcp-http --host 0.0.0.0` (port
+# 8790, state in /config/mcp-http; docs/agents.md#remote-mcp-http).
 #
 # Base images pinned by tag and digest (python 3.12.14 build of 2026-09-25, uv 0.13.0 of
 # 2026-10-09): a re-tagged image can't slip in.

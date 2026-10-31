@@ -623,6 +623,36 @@ def mcp(
     run_stdio(_settings(), agent_name=agent_name, device_ids=device or None)
 
 
+@app.command("mcp-http")
+def mcp_http(
+    host: Annotated[Optional[str], typer.Option("--host", help="Address to bind (default AGENTRING_MCP_HOST, else 127.0.0.1).")] = None,
+    port: Annotated[Optional[int], typer.Option("--port", help="Port (default AGENTRING_MCP_PORT, else 8790).")] = None,
+    relay_url: Annotated[Optional[str], typer.Option("--relay-url", help="The relay every API key is used against "
+                                                     "(default AGENTRING_RELAY_URL). With a hub (AGENTRING_HUB_ADMIN_URL), "
+                                                     "the relay's internal address.")] = None,
+    data_dir: Annotated[Optional[str], typer.Option("--data-dir", help="Per-user state (default AGENTRING_MCP_DATA_DIR, "
+                                                    "else ~/.agentring/mcp-http).")] = None,
+    max_calls: Annotated[Optional[int], typer.Option("--max-calls", help="Voice calls at once, all users together "
+                                                     "(default AGENTRING_MCP_MAX_CALLS, else 4).")] = None,
+    max_body: Annotated[Optional[int], typer.Option("--max-body", help="Largest request body in bytes "
+                                                    "(default AGENTRING_MCP_MAX_BODY, else 1 MiB).")] = None,
+    allow_origin: Annotated[Optional[list[str]], typer.Option("--allow-origin", help="Browser Origin allowed to use "
+                                                              "/mcp, repeatable; '*' = any (default "
+                                                              "AGENTRING_MCP_ALLOWED_ORIGINS, comma-separated; else none).")] = None,
+) -> None:
+    """Run as a remote MCP server (Streamable HTTP at /mcp) for many users; each sends its relay API key."""
+    from pathlib import Path
+
+    from .mcp_http import HttpConfig, run_http
+
+    try:
+        cfg = HttpConfig.from_env(host=host, port=port, relay_url=relay_url, data_dir=Path(data_dir) if data_dir else None,
+                                  max_calls=max_calls, max_body=max_body, allowed_origins=allow_origin or None)
+    except ConfigError as e:
+        raise _fail(str(e)) from None
+    run_http(cfg)
+
+
 def _describe(event: dict[str, Any]) -> str | None:
     t = event.get("type")
     if t == "msg.new":

@@ -89,17 +89,33 @@ Tenant  = { tenant_id, base_url, agent_name, limits: Limits, disabled: bool, cre
 `agentring mcp-http` serves the same tools as `agentring mcp` (`send_message`,
 `get_replies`, `call`, `status`) over MCP Streamable HTTP at `POST /mcp`.
 
-- **Auth:** `Authorization: Bearer ak_…` (the tenant's relay API key).
-- **Which relay:** with `AGENTRING_HUB_ADMIN_URL` + admin token, the key is resolved to
-  its tenant base URL with `POST /admin/v1/resolve-key` (cached); otherwise every key
-  is used against the one relay in `AGENTRING_RELAY_URL` (self-hosted).
+- **Auth:** `Authorization: Bearer ak_…` (the tenant's relay API key); anything else
+  gets `401` with `WWW-Authenticate: Bearer`.
+- **Which relay:** with `AGENTRING_HUB_ADMIN_URL` + admin token
+  (`AGENTRING_HUB_ADMIN_TOKEN_FILE` or `AGENTRING_HUB_ADMIN_TOKEN`), the key is resolved
+  to `{tenant_id, base_url}` with `POST /admin/v1/resolve-key` (positive answers cached
+  5 minutes by a hash of the key; `404` → `401` to the client; the hub unreachable or
+  refusing the admin token → `503`). The admin URL must be the relay's internal
+  address (the admin API hides from proxied requests). If `AGENTRING_RELAY_URL` is also
+  set, tenants are reached at `{AGENTRING_RELAY_URL}/t/{tenant_id}` (internal) instead
+  of the public `base_url`. Without a hub, every key is checked against the one relay
+  in `AGENTRING_RELAY_URL` with `GET /v1/status` (self-hosted).
 - **Voice:** `call` runs the voice AI on the server (provider and key from the server's
-  environment, as for `agentring call --ai`), with a global cap on concurrent calls.
-- **State:** `get_replies` cursors per tenant in a small SQLite file.
+  environment, as for `agentring call --ai`), with a global cap on concurrent calls
+  (`AGENTRING_MCP_MAX_CALLS`, default 4; over it the tool error is `busy`). The
+  relay's own one-call-per-tenant rule still applies. `agents.yaml` is never used.
+- **Long requests:** `call` and a waiting `get_replies` answer as `text/event-stream`
+  with an SSE keep-alive comment every 15 s.
+- **State:** per tenant, the daemon's usual SQLite mirror (`Store`, synced with the
+  REST events API) in `{AGENTRING_MCP_DATA_DIR}/tenants/{tenant_id}.db`; it records
+  which replies `get_replies` already returned, shared by all the tenant's sessions.
+- **Sessions:** `Mcp-Session-Id` from `initialize`, in memory (a restart means
+  clients re-initialize; the per-tenant state is on disk). `DELETE /mcp` ends one.
 - Install in Claude Code:
   `claude mcp add --transport http agentring https://{domain}/mcp --header "Authorization: Bearer ak_…"`
 
-OAuth (for claude.ai custom connectors) is a later step.
+All options: [agents.md](agents.md#remote-mcp-http). OAuth (for claude.ai custom
+connectors) is a later step.
 
 ## Control plane (private repo)
 
