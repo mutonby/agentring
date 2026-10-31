@@ -1,9 +1,13 @@
-"""agentring as an MCP server (stdio): lets any MCP-capable agent message and call the user.
+"""agentring as an MCP server: lets any MCP-capable agent message and call the user.
 
-    claude mcp add agentring -- agentring mcp
+    claude mcp add agentring -- agentring mcp                                  # stdio
+    claude mcp add --transport http agentring https://host/mcp \\
+        --header "Authorization: Bearer ak_..."                                 # mcp_http.py
 
-A small JSON-RPC 2.0 loop over stdin/stdout (newline-delimited), enough for MCP tools; no
-SDK, like the voice side. Logs go to stderr: stdout carries only protocol messages.
+This module holds what both transports share, the tools (`AgentringTools`) and the
+JSON-RPC handling (`handle_rpc`), and the stdio transport: a small JSON-RPC 2.0 loop over
+stdin/stdout (newline-delimited). No SDK, like the voice side. Logs go to stderr: stdout
+carries only protocol messages.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -77,17 +82,53 @@ class ToolError(Exception):
     """Reported to the agent as a tool error (isError), not a protocol error."""
 
 
+class CallSlots:
+    """A cap on concurrent voice calls, shared by every user of one server (each call holds a
+    voice AI session and its audio). Used from the event loop only."""
+
+    def __init__(self, limit: int):
+        self.limit = max(0, limit)
+        self.used = 0
+
+    def try_acquire(self) -> bool:
+        if self.used >= self.limit:
+            return False
+        self.used += 1
+        return True
+
+    def release(self) -> None:
+        self.used = max(0, self.used - 1)
+
+
 class AgentringTools:
-    def __init__(self, settings: Settings, *, poll_s: float = 2.0, agent_name: str | None = None,
-                 device_ids: list[str] | None = None):
-        self.s = settings
+    """The MCP tools for one relay (one user). Transport-agnostic: the stdio server has one,
+    the HTTP server one per tenant.
+
+    `store` mirrors the relay's messages and remembers which replies get_replies already
+    returned. `agents_file` (agents.yaml) gives the voice AI the user's agents and MCP
+    servers on calls; None = none (the HTTP server never runs local commands for its users).
+    `call_slots` caps voice calls across instances."""
+
+    def __init__(self, client: RelayClient, store: Store, *, relay_url: str | None = None, poll_s: float = 2.0,
+                 agent_name: str | None = None, device_ids: list[str] | None = None,
+                 agents_file: Path | None = None, call_slots: CallSlots | None = None):
+        self.client = client
+        self.store = store
+        self.relay_url = relay_url or client.relay_url
         self.agent_name = agent_name  # caller name on the phone; None = the relay's
         self.device_ids = device_ids  # ring only these phones; None = every paired phone
-        self.client = RelayClient(settings.relay_url, settings.api_key)
-        self.store = Store(settings.db_path)
+        self.agents_file = agents_file
+        self.call_slots = call_slots
         self.poll_s = poll_s
         self._call_lock = asyncio.Lock()
         self._db = threading.Lock()  # tool calls run concurrently, each in a thread
+
+    @classmethod
+    def from_settings(cls, settings: Settings, **kw: Any) -> AgentringTools:
+        """The local daemon's relay, store and agents.yaml (what `agentring mcp` uses)."""
+        kw.setdefault("agents_file", home_dir() / "agents.yaml")
+        return cls(RelayClient(settings.relay_url, settings.api_key), Store(settings.db_path),
+                   relay_url=settings.relay_url, **kw)
 
     def close(self) -> None:
         self.client.close()
@@ -95,9 +136,12 @@ class AgentringTools:
 
     async def send_message(self, text: str, reply_to: str | None = None) -> dict[str, Any]:
         m = await asyncio.to_thread(self.client.post_message, text, reply_to=reply_to)
+        await asyncio.to_thread(self._record_sent, m)  # not on the event loop: get_replies may hold the lock
+        return {"msg_id": m["msg_id"]}
+
+    def _record_sent(self, m: dict[str, Any]) -> None:
         with self._db:
             self.store.upsert_message(m["msg_id"], "agent", m["text"], m["created_at"], m.get("reply_to"))
-        return {"msg_id": m["msg_id"]}
 
     def _new_replies(self) -> list[dict[str, Any]]:
         with self._db:
@@ -139,9 +183,9 @@ class AgentringTools:
         except VoiceConfigError as e:
             raise ToolError(f"calls: {e}") from None
         agents = None
-        if (home_dir() / "agents.yaml").exists():
+        if self.agents_file is not None and self.agents_file.exists():
             try:
-                agents = load_agents(home_dir() / "agents.yaml")
+                agents = load_agents(self.agents_file)
             except AgentsConfigError as e:
                 raise ToolError(str(e)) from None
         instructions = DEFAULT_INSTRUCTIONS
@@ -149,16 +193,23 @@ class AgentringTools:
             instructions += f"\n\nWhat the agent that asked for this call wants you to know, tell or ask:\n{context}"
         if self._call_lock.locked():
             raise ToolError("already on a call")
-        async with self._call_lock:
-            built = await build_agent(choice, instructions=instructions, agents=agents)
-            try:
-                created = await asyncio.to_thread(self.client.create_call, reason,
-                                                  priority="urgent" if urgent else "normal",
-                                                  agent_name=self.agent_name, device_ids=self.device_ids)
-                r = await built.agent.run(CallInfo(created["call"]["call_id"], reason), created["join"],
-                                          relay=self.client)
-            finally:
-                await built.aclose()  # agents' late answers are stopped; the user got the gist on the call
+        if self.call_slots is not None and not self.call_slots.try_acquire():
+            raise ToolError("busy: this server is on as many calls as it allows; try again in a few minutes, "
+                            "or use send_message")
+        try:
+            async with self._call_lock:
+                built = await build_agent(choice, instructions=instructions, agents=agents)
+                try:
+                    created = await asyncio.to_thread(self.client.create_call, reason,
+                                                      priority="urgent" if urgent else "normal",
+                                                      agent_name=self.agent_name, device_ids=self.device_ids)
+                    r = await built.agent.run(CallInfo(created["call"]["call_id"], reason), created["join"],
+                                              relay=self.client)
+                finally:
+                    await built.aclose()  # agents' late answers are stopped; the user got the gist on the call
+        finally:
+            if self.call_slots is not None:
+                self.call_slots.release()
         if not r.answered:
             try:  # nobody answered: leave the reason (and context) where the user can reply
                 r.fallback_msg_id = await asyncio.to_thread(missed_call_message, self.client, r.call_id, reason, context)
@@ -171,8 +222,89 @@ class AgentringTools:
     async def status(self) -> dict[str, Any]:
         st = await asyncio.to_thread(self.client.status)
         devices = await asyncio.to_thread(self.client.list_devices)
-        return {"relay": self.s.relay_url, "relay_status": st,
+        return {"relay": self.relay_url, "relay_status": st,
                 "phones": [{"device_id": d["device_id"], "name": d["name"]} for d in devices]}
+
+
+
+# ------------------------------------------------------------------ JSON-RPC (both transports)
+
+TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
+
+
+def is_request(m: Any) -> bool:
+    """A JSON-RPC request (needs a response); notifications and responses are not."""
+    return isinstance(m, dict) and "method" in m and m.get("id") is not None
+
+
+def rpc_response(rid: Any, result: Any = None, error: tuple[int, str] | None = None) -> dict[str, Any]:
+    msg: dict[str, Any] = {"jsonrpc": "2.0", "id": rid}
+    if error:
+        msg["error"] = {"code": error[0], "message": error[1]}
+    else:
+        msg["result"] = result
+    return msg
+
+
+def negotiate_version(requested: Any) -> str:
+    return requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
+
+
+def initialize_result(params: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "protocolVersion": negotiate_version(params.get("protocolVersion")),
+        "capabilities": {"tools": {"listChanged": False}},
+        "serverInfo": {"name": "agentring", "version": __version__},
+        "instructions": INSTRUCTIONS,
+    }
+
+
+async def call_tool(tools: AgentringTools, name: Any, args: Any) -> dict[str, Any]:
+    """Runs one tool; any failure is a tool result with isError (the agent reads it). Cancellation
+    propagates: a cancelled request gets no response."""
+    try:
+        if not isinstance(args, dict):
+            raise TypeError("arguments must be an object")
+        out = await getattr(tools, name)(**args)
+        return {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],
+                "structuredContent": out, "isError": False}
+    except TypeError as e:
+        return _tool_error(f"bad arguments: {e}")
+    except (RelayError, ToolError) as e:
+        return _tool_error(str(e))
+    except Exception as e:
+        log.exception("tool %s failed", name)
+        return _tool_error(f"{type(e).__name__}: {e}")
+
+
+async def handle_rpc(tools: AgentringTools, m: Any) -> dict[str, Any] | None:
+    """One JSON-RPC message to its response; None for notifications and responses (transports
+    handle `notifications/cancelled` themselves). `tools/call` waits for the tool, which may take
+    minutes (`call`)."""
+    if not is_request(m):
+        return None
+    method, rid, params = m["method"], m["id"], m.get("params") or {}
+    if not isinstance(params, dict):
+        return rpc_response(rid, error=(-32602, "params must be an object"))
+    if method == "initialize":
+        return rpc_response(rid, initialize_result(params))
+    if method == "ping":
+        return rpc_response(rid, {})
+    if method == "tools/list":
+        return rpc_response(rid, {"tools": TOOLS})
+    if method == "tools/call":
+        name = params.get("name")
+        if name not in TOOL_NAMES:
+            return rpc_response(rid, error=(-32602, f"unknown tool: {name}"))
+        return rpc_response(rid, await call_tool(tools, name, params.get("arguments") or {}))
+    return rpc_response(rid, error=(-32601, f"method not found: {method}"))
+
+
+def _tool_error(text: str) -> dict[str, Any]:
+    return {"content": [{"type": "text", "text": text}], "isError": True}
+
+
+# ------------------------------------------------------------------ stdio transport
 
 
 class McpServer:
@@ -190,74 +322,38 @@ class McpServer:
             if asyncio.iscoroutine(r):
                 await r
 
-    async def _reply(self, rid: Any, result: Any = None, error: tuple[int, str] | None = None) -> None:
-        msg: dict[str, Any] = {"jsonrpc": "2.0", "id": rid}
-        if error:
-            msg["error"] = {"code": error[0], "message": error[1]}
-        else:
-            msg["result"] = result
-        await self.send(msg)
-
     async def handle(self, line: str) -> None:
         try:
             msg = json.loads(line)
         except ValueError:
-            await self._reply(None, error=(-32700, "parse error"))
+            await self.send(rpc_response(None, error=(-32700, "parse error")))
             return
         for m in msg if isinstance(msg, list) else [msg]:
             await self._dispatch(m)
 
     async def _dispatch(self, m: Any) -> None:
-        if not isinstance(m, dict) or "method" not in m:
-            return  # a response to us (we send no requests) or junk
-        method, rid, params = m["method"], m.get("id"), m.get("params") or {}
-        if rid is None:  # notification
-            if method == "notifications/cancelled":
-                t = self._running.get(params.get("requestId"))
+        if not is_request(m):
+            if isinstance(m, dict) and m.get("method") == "notifications/cancelled":
+                t = self._running.get((m.get("params") or {}).get("requestId"))
                 if t:
                     t.cancel()
-            return
-        if method == "initialize":
-            v = params.get("protocolVersion")
-            await self._reply(rid, {
-                "protocolVersion": v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
-                "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "agentring", "version": __version__},
-                "instructions": INSTRUCTIONS,
-            })
-        elif method == "ping":
-            await self._reply(rid, {})
-        elif method == "tools/list":
-            await self._reply(rid, {"tools": TOOLS})
-        elif method == "tools/call":
+            return  # other notifications, a response to us (we send no requests) or junk
+        if m["method"] == "tools/call":
             # Each call in its own task: a phone call takes minutes and must not block pings or messages.
-            t = asyncio.create_task(self._call_tool(rid, params.get("name"), params.get("arguments") or {}))
+            rid = m["id"]
+            t = asyncio.create_task(self._respond(m))
             self._running[rid] = t
             t.add_done_callback(lambda _t, rid=rid: self._running.pop(rid, None))
         else:
-            await self._reply(rid, error=(-32601, f"method not found: {method}"))
+            await self._respond(m)
 
-    async def _call_tool(self, rid: Any, name: Any, args: dict[str, Any]) -> None:
-        names = {t["name"] for t in TOOLS}
-        if name not in names:
-            await self._reply(rid, error=(-32602, f"unknown tool: {name}"))
-            return
+    async def _respond(self, m: dict[str, Any]) -> None:
         try:
-            out = await getattr(self.tools, name)(**args)
-            result = {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False)}],
-                      "structuredContent": out, "isError": False}
+            resp = await handle_rpc(self.tools, m)
         except asyncio.CancelledError:
             return  # the client cancelled it: no response is expected
-        except TypeError as e:
-            result = _tool_error(f"bad arguments: {e}")
-        except RelayError as e:
-            result = _tool_error(str(e))
-        except ToolError as e:
-            result = _tool_error(str(e))
-        except Exception as e:
-            log.exception("tool %s failed", name)
-            result = _tool_error(f"{type(e).__name__}: {e}")
-        await self._reply(rid, result)
+        if resp is not None:
+            await self.send(resp)
 
     async def serve(self, read_line: Callable[[], Awaitable[str]]) -> None:
         try:
@@ -273,13 +369,9 @@ class McpServer:
             await asyncio.gather(*self._running.values(), return_exceptions=True)
 
 
-def _tool_error(text: str) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": text}], "isError": True}
-
-
 def run_stdio(settings: Settings, *, agent_name: str | None = None, device_ids: list[str] | None = None) -> None:
     async def main() -> None:
-        tools = AgentringTools(settings, agent_name=agent_name, device_ids=device_ids)
+        tools = AgentringTools.from_settings(settings, agent_name=agent_name, device_ids=device_ids)
         out = sys.stdout
 
         def write(line: str) -> None:
