@@ -4,8 +4,8 @@ There are two directions, and you can use both:
 
 1. **Your agent reaches you.** Claude Code, OpenClaw, n8n or a script messages your
    phone, waits for your reply, or calls you. A voice AI talks to you for the
-   agent and hands it the transcript. Use the [MCP server](#mcp-server-agentring-mcp),
-   the CLI or the relay's REST API.
+   agent and hands it the transcript. Use the [MCP server](#mcp-server-agentring-mcp)
+   (or its [HTTP version](#remote-mcp-http)), the CLI or the relay's REST API.
 2. **You reach your agents by phone.** On a call (one the agent placed, or one you
    made with "Call agent" in the app), the voice AI can ask your agents for help.
    Each agent in [`agents.yaml`](#agentsyaml) is a tool for it, through
@@ -46,8 +46,82 @@ to tell you, what to ask and what not to decide. If `~/.agentring/agents.yaml` e
 the voice AI on these calls can also consult your agents.
 
 The server is a small JSON-RPC loop with no MCP SDK and no extra dependencies
-(see [architecture](architecture.md#accepted-deviations)). It does not support
-Streamable HTTP. HTTP-only clients such as n8n use the REST API (below).
+(see [architecture](architecture.md#accepted-deviations)). For an MCP URL instead of
+a local command, see [Remote MCP (HTTP)](#remote-mcp-http). HTTP-only clients such
+as n8n can also use the REST API (below).
+
+## Remote MCP (HTTP)
+
+`agentring mcp-http` serves the same four tools over MCP **Streamable HTTP** at
+`/mcp`, for many users at once. Each user's agent sends its relay API key as a
+bearer token, so nothing about the user is configured on the server, and the agent's
+computer needs no daemon:
+
+```bash
+claude mcp add --transport http agentring https://mcp.example.com/mcp \
+  --header "Authorization: Bearer ak_..."
+```
+
+```json
+{ "mcpServers": { "agentring": { "type": "http", "url": "https://mcp.example.com/mcp",
+                                 "headers": { "Authorization": "Bearer ak_..." } } } }
+```
+
+Run it next to your relay (self-hosted: every key is checked against that one relay
+with `GET /v1/status`):
+
+```bash
+agentring mcp-http --relay-url https://relay.example.com          # listens on 127.0.0.1:8790
+```
+
+| Option | Environment | Default | |
+|---|---|---|---|
+| `--host`, `--port` | `AGENTRING_MCP_HOST`, `AGENTRING_MCP_PORT` | `127.0.0.1`, `8790` | Put TLS (Caddy, Traefik) in front of it. |
+| `--relay-url` | `AGENTRING_RELAY_URL` | | The relay. With a hub, its internal address (optional). |
+| | `AGENTRING_HUB_ADMIN_URL`, `AGENTRING_HUB_ADMIN_TOKEN_FILE` or `AGENTRING_HUB_ADMIN_TOKEN` | | Hub mode: keys are resolved to their tenant ([cloud.md](cloud.md#remote-mcp-server)). |
+| `--data-dir` | `AGENTRING_MCP_DATA_DIR` | `~/.agentring/mcp-http` | Per-user state, one SQLite file per tenant. |
+| `--max-calls` | `AGENTRING_MCP_MAX_CALLS` | `4` | Voice calls at once, all users together; one more gets the tool error `busy`. |
+| `--max-body` | `AGENTRING_MCP_MAX_BODY` | `1048576` | Largest request body (bytes); larger gets 413. |
+| `--allow-origin` | `AGENTRING_MCP_ALLOWED_ORIGINS` (comma-separated) | none | Browser `Origin`s allowed to use `/mcp` (`*` = any). Requests from any other Origin get 403; MCP clients that are not browsers send none. |
+
+How it behaves:
+
+- **Auth.** No key, or one the relay (or hub) doesn't know: `401` with
+  `WWW-Authenticate: Bearer`. A working key is remembered for 5 minutes (by its
+  hash; keys are never logged).
+- **Protocol.** `POST /mcp` takes JSON-RPC (`initialize`, `ping`, `tools/list`,
+  `tools/call`, notifications, `notifications/cancelled`; batches too). `initialize`
+  returns an `Mcp-Session-Id`; send it back on later requests (an unknown or expired
+  one gets 404: initialize again). Requests without a session id also work.
+  `DELETE /mcp` ends the session and cancels its running requests; `GET /mcp` is 405
+  (the server sends nothing unprompted). `GET /healthz` is the health check.
+- **Long calls.** Quick requests get `application/json`. `call`, and `get_replies` with
+  `wait_s`, get a `text/event-stream` (if the client accepts it) with a keep-alive
+  comment every 15 s until the result, so proxies don't cut the request. Raise the
+  proxy's read timeout anyway if it is shorter than a call. If the client hangs up,
+  a waiting `get_replies` stops; a phone call goes on until it ends.
+- **Voice.** `call` runs the voice AI on this server, with the provider and key from
+  its environment (`AGENTRING_VOICE_PROVIDER`, `GEMINI_API_KEY`, …) as for
+  `agentring call --ai`. `agents.yaml` is not used: the server never runs commands
+  for its users.
+- **State.** Which replies `get_replies` already returned is kept per tenant (hub
+  tenant id, or the relay id in self-hosted mode) in
+  `{data dir}/tenants/{id}.db`, the same mirror the local daemon keeps, so every
+  session of one user sees each reply once, also after a restart.
+
+With Docker, the daemon image (`daemon/Dockerfile`, entrypoint `agentring`) runs it;
+for example as a service in `deploy/docker-compose.yml`, routed at `/mcp` by the proxy:
+
+```yaml
+  mcp:
+    build: ../daemon                 # or the agentring-daemon image of a release that has mcp-http
+    command: ["mcp-http", "--host", "0.0.0.0"]
+    environment:
+      AGENTRING_RELAY_URL: http://relay:8080
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    volumes: ["mcp-data:/config"]    # state in /config/mcp-http
+    read_only: true
+```
 
 ## agents.yaml
 
