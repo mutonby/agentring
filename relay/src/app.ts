@@ -38,6 +38,8 @@ export interface TenantOptions {
   /** SHA-256 of the tenant's current API key (the hub stores only the hash; keys rotate). */
   apiKeyHash: () => Buffer;
   limits: () => Limits;
+  /** Whether a short-lived agent token (by its SHA-256) is currently valid for this tenant. */
+  agentToken?: (hash: Buffer) => boolean;
   /** LiveKit room name prefix, "{tenant_id}.". */
   roomPrefix: string;
 }
@@ -107,7 +109,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   const ctx: Ctx = {
     cfg,
     db,
-    auth: new Auth(db, apiKeyHash, jwtSecret, relayId),
+    auth: new Auth(db, apiKeyHash, jwtSecret, relayId, opts.tenant?.agentToken),
     events,
     relayId,
     pushConfig,

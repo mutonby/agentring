@@ -57,7 +57,8 @@ IDLE_CONNECTION_S = 75.0
 READ_TIMEOUT_S = 30.0
 
 _UNPARSABLE = object()  # a request body that is not JSON
-_API_KEY = re.compile(r"^ak_[\x21-\x7e]{1,125}$")  # ≤ 128 chars, like the hub's resolve-key
+# A relay API key, or (hub mode) a short-lived agent token; ≤ 128 chars, like the hub's resolve-key.
+_API_KEY = re.compile(r"^a[kt]_[\x21-\x7e]{1,125}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 REASONS = {200: "OK", 202: "Accepted", 204: "No Content", 400: "Bad Request", 401: "Unauthorized",
            403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 408: "Request Timeout",

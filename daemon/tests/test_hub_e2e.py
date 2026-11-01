@@ -105,3 +105,19 @@ def test_a_new_session_rechecks_the_key(hub: str, start):
     r = Client(s.url, a["api_key"]).post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                                           "params": {"protocolVersion": "2025-06-18", "capabilities": {}}})
     assert r.status_code == 401
+
+
+def test_an_agent_token_works_like_the_key(hub: str, start):
+    a = new_tenant(hub)
+    tid, base = a["tenant"]["tenant_id"], a["tenant"]["base_url"]
+    with RelayClient(base, a["api_key"]) as rc:
+        simulate_phone_pairing(rc.create_pairing_token()["qr_payload"])
+    tok = httpx.post(f"{hub}/admin/v1/tenants/{tid}/agent-tokens", headers=ADMIN, json={"ttl_s": 60}).json()
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, poll_s=0.3)
+    c = Client(s.url, tok["agent_token"])  # stateless: no initialize
+    assert [p["name"] for p in c.tool("status")["structuredContent"]["phones"]] == ["Test Phone"]
+    assert not c.tool("send_message", text="test message")["isError"]
+    # Rotating the key revokes the token.
+    httpx.post(f"{hub}/admin/v1/tenants/{tid}/api-key", headers=ADMIN)
+    assert c.tool("status")["isError"]
+    assert c.post({"jsonrpc": "2.0", "id": 99, "method": "ping"}).status_code == 401

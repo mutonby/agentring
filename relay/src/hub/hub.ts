@@ -18,9 +18,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyRequest } from "fastify";
 import { buildApp, type BuiltApp } from "../app.js";
+import { sha256 } from "../auth.js";
 import type { Config } from "../config.js";
 import { ApiError, notFound, unauthorized } from "../errors.js";
-import { newId } from "../ids.js";
+import { newId, randomToken } from "../ids.js";
 import { LiveKitServer, type LiveKitService } from "../livekit.js";
 import { FcmProvider } from "../push/fcm.js";
 import type { PushProvider } from "../push/push-provider.js";
@@ -34,6 +35,9 @@ const TENANT_PATH = /^\/t\/(tnt_[0-9A-HJKMNP-TV-Z]{26})(\/[^?]*)?(\?.*)?$/;
 /** Unload a tenant that has had no request, socket or open call for this long. */
 const IDLE_UNLOAD_MS = 15 * 60_000;
 const SWEEP_EVERY_MS = 60_000;
+/** Agent tokens (admin API): default and maximum lifetime. */
+const AGENT_TOKEN_TTL_S = 600;
+const AGENT_TOKEN_MAX_TTL_S = 3600;
 
 export interface HubOptions {
   adminToken: string;
@@ -82,6 +86,11 @@ function rejectUpgrade(socket: Duplex, status: number, code: string, message: st
 export class Hub {
   readonly registry: Registry;
   private readonly loaded = new Map<string, Promise<Tenant | undefined>>();
+  /**
+   * Short-lived agent tokens by SHA-256 (hex). Kept in memory only: a restart revokes
+   * them, like rotating the tenant's key or deleting the tenant does.
+   */
+  private readonly agentTokens = new Map<string, { tenantId: string; expiresAt: number }>();
   private readonly provider?: PushProvider;
   private readonly livekit?: LiveKitService;
   private sweeper?: NodeJS.Timeout;
@@ -139,6 +148,7 @@ export class Hub {
       tenant: {
         apiKeyHash: () => t.record.api_key_hash,
         limits: () => t.record.limits,
+        agentToken: (hash) => this.agentTokenValid(tenantId, hash),
         roomPrefix: `${tenantId}.`,
       },
     });
@@ -158,6 +168,7 @@ export class Hub {
   /** Unloads tenants that are idle: no recent request, no open socket, no open call. */
   async sweep(now = Date.now()): Promise<void> {
     const idleMs = this.opts.idleUnloadMs ?? IDLE_UNLOAD_MS;
+    this.pruneAgentTokens(now);
     for (const [id, p] of [...this.loaded]) {
       const t = await p.catch(() => undefined);
       if (!t) continue;
@@ -218,9 +229,42 @@ export class Hub {
     if (patch.disabled) t.built.ctx.hub.closeAll();
   }
 
+  /**
+   * A short-lived credential that acts as the tenant's agent, like its API key, for
+   * `ttlS` seconds: lets the control plane (which never keeps tenant keys) act for a
+   * tenant, e.g. a "send a test message" button, through the relay API or `mcp-http`.
+   */
+  issueAgentToken(tenantId: string, ttlS = AGENT_TOKEN_TTL_S): { agent_token: string; expires_at: number } {
+    this.pruneAgentTokens();
+    const token = randomToken("at");
+    const expiresAt = Date.now() + Math.min(ttlS, AGENT_TOKEN_MAX_TTL_S) * 1000;
+    this.agentTokens.set(sha256(token).toString("hex"), { tenantId, expiresAt });
+    return { agent_token: token, expires_at: expiresAt };
+  }
+
+  /** The tenant an agent token belongs to, while it is valid. */
+  agentTokenTenant(token: string): string | undefined {
+    const e = this.agentTokens.get(sha256(token).toString("hex"));
+    return e && e.expiresAt > Date.now() ? e.tenantId : undefined;
+  }
+
+  private agentTokenValid(tenantId: string, hash: Buffer): boolean {
+    const e = this.agentTokens.get(hash.toString("hex"));
+    return e !== undefined && e.tenantId === tenantId && e.expiresAt > Date.now();
+  }
+
+  private revokeAgentTokens(tenantId: string): void {
+    for (const [h, e] of this.agentTokens) if (e.tenantId === tenantId) this.agentTokens.delete(h);
+  }
+
+  private pruneAgentTokens(now = Date.now()): void {
+    for (const [h, e] of this.agentTokens) if (e.expiresAt <= now) this.agentTokens.delete(h);
+  }
+
   rotateKey(t: Tenant): string {
     const apiKey = this.registry.rotateKey(t.record.tenant_id);
     t.record = this.registry.get(t.record.tenant_id)!;
+    this.revokeAgentTokens(t.record.tenant_id);
     t.built.ctx.hub.disconnectAgent();
     return apiKey;
   }
@@ -228,6 +272,7 @@ export class Hub {
   async delete(tenantId: string): Promise<void> {
     // Registry first: from here on no request can (re)load the tenant while it closes.
     this.registry.delete(tenantId);
+    this.revokeAgentTokens(tenantId);
     await this.unload(tenantId);
     if (this.cfg.dataDir !== ":memory:") rmSync(this.tenantDir(tenantId), { recursive: true, force: true });
     this.log.info({ tenant: tenantId }, "tenant deleted");
@@ -406,6 +451,25 @@ export async function buildHub(cfg: Config, opts: HubOptions): Promise<{ app: Fa
       },
     );
 
+    scope.post<{ Params: { tid: string }; Body: { ttl_s?: number } | undefined }>(
+      "/admin/v1/tenants/:tid/agent-tokens",
+      {
+        schema: {
+          params: TID_PARAMS,
+          body: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: { ttl_s: { type: "integer", minimum: 30, maximum: AGENT_TOKEN_MAX_TTL_S } },
+          },
+        },
+      },
+      async (req, reply) => {
+        const t = await mustTenant(req.params.tid);
+        req.log.info({ tenant: t.record.tenant_id }, "agent token issued");
+        return reply.code(201).send(hub.issueAgentToken(t.record.tenant_id, req.body?.ttl_s ?? AGENT_TOKEN_TTL_S));
+      },
+    );
+
     scope.get<{ Params: { tid: string } }>("/admin/v1/tenants/:tid/devices", { schema: { params: TID_PARAMS } }, async (req) => ({
       devices: listDevices((await mustTenant(req.params.tid)).built.ctx),
     }));
@@ -432,7 +496,9 @@ export async function buildHub(cfg: Config, opts: HubOptions): Promise<{ app: Fa
         },
       },
       async (req) => {
-        const r = hub.registry.byApiKey(req.body.api_key);
+        const key = req.body.api_key;
+        // An agent token (`at_…`) resolves like the tenant's API key while it is valid.
+        const r = key.startsWith("at_") ? hub.registry.get(hub.agentTokenTenant(key) ?? "") : hub.registry.byApiKey(key);
         if (!r) throw notFound("API key");
         if (r.disabled) throw new ApiError(403, "tenant_disabled", "This account is disabled");
         return { tenant_id: r.tenant_id, base_url: hub.baseUrl(r.tenant_id) };

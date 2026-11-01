@@ -248,6 +248,56 @@ describe("hub mode", () => {
     expect((await http("GET", `/t/${a.tid}/v1/status`, dev.headers)).status).toBe(401);
   });
 
+  it("issues short-lived agent tokens that act as the tenant's agent", async () => {
+    const a = await createTenant({ messages_per_day: 1 });
+    const b = await createTenant();
+    const issue = (tid: string, payload?: unknown) =>
+      app.inject({ method: "POST", url: `/admin/v1/tenants/${tid}/agent-tokens`, headers: ADMIN, payload: payload as never });
+    const resolve = (api_key: string) => app.inject({ method: "POST", url: "/admin/v1/resolve-key", headers: ADMIN, payload: { api_key } });
+
+    const r = await issue(a.tid, { ttl_s: 60 });
+    expect(r.statusCode).toBe(201);
+    const { agent_token, expires_at } = r.json() as { agent_token: string; expires_at: number };
+    expect(agent_token).toMatch(/^at_[A-Za-z0-9_-]{43}$/);
+    expect(expires_at).toBeGreaterThan(Date.now() + 55_000);
+    expect(expires_at).toBeLessThanOrEqual(Date.now() + 60_000);
+    const tok = { authorization: `Bearer ${agent_token}` };
+
+    // Same powers as the API key, quotas included; only on its own tenant.
+    await pair(a.tid);
+    expect((await http("GET", `/t/${a.tid}/v1/status`, tok)).status).toBe(200);
+    const sent = await http("POST", `/t/${a.tid}/v1/messages`, tok, { text: "test" });
+    expect(sent.status).toBe(201);
+    expect(sent.json.from).toBe("agent");
+    expect((await http("POST", `/t/${a.tid}/v1/messages`, tok, { text: "again" })).status).toBe(402);
+    expect((await http("GET", `/t/${b.tid}/v1/status`, tok)).status).toBe(401);
+    expect((await resolve(agent_token)).json()).toEqual({ tenant_id: a.tid, base_url: a.tenant.base_url });
+    expect((await resolve("at_unknown")).statusCode).toBe(404);
+
+    // Bounds, unknown tenants, admin only.
+    expect((await issue(a.tid, { ttl_s: 10 })).statusCode).toBe(400);
+    expect((await issue(a.tid, { ttl_s: 7200 })).statusCode).toBe(400);
+    expect((await issue("tnt_00000000000000000000000000")).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: `/admin/v1/tenants/${a.tid}/agent-tokens` })).statusCode).toBe(401);
+
+    // Rotating the key revokes the tenant's agent tokens.
+    await app.inject({ method: "POST", url: `/admin/v1/tenants/${a.tid}/api-key`, headers: ADMIN });
+    expect((await http("GET", `/t/${a.tid}/v1/status`, tok)).status).toBe(401);
+    expect((await resolve(agent_token)).statusCode).toBe(404);
+
+    // They expire.
+    const short = (await issue(b.tid, { ttl_s: 30 })).json().agent_token as string;
+    expect((await http("GET", `/t/${b.tid}/v1/status`, { authorization: `Bearer ${short}` })).status).toBe(200);
+    const realNow = Date.now;
+    Date.now = () => realNow() + 31_000;
+    try {
+      expect((await http("GET", `/t/${b.tid}/v1/status`, { authorization: `Bearer ${short}` })).status).toBe(401);
+      expect((await resolve(short)).statusCode).toBe(404);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it("protects the admin API", async () => {
     expect((await app.inject({ method: "POST", url: "/admin/v1/tenants" })).statusCode).toBe(401);
     expect((await app.inject({ method: "POST", url: "/admin/v1/tenants", headers: { authorization: "Bearer wrong" } })).statusCode).toBe(401);
