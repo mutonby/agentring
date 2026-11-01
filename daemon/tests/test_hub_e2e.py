@@ -94,3 +94,14 @@ def test_a_deleted_account_is_refused_at_once(hub: str, start):
     assert httpx.delete(f"{hub}/admin/v1/tenants/{a['tenant']['tenant_id']}", headers=ADMIN).status_code == 204
     assert c.tool("status")["isError"]  # the relay says the tenant is gone...
     assert c.post({"jsonrpc": "2.0", "id": 99, "method": "ping"}).status_code == 401  # ...so the key is dropped
+
+
+def test_a_new_session_rechecks_the_key(hub: str, start):
+    a = new_tenant(hub)
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN)
+    c = Client(s.url, a["api_key"])
+    c.initialize()  # the key is now cached as valid
+    assert httpx.delete(f"{hub}/admin/v1/tenants/{a['tenant']['tenant_id']}", headers=ADMIN).status_code == 204
+    r = Client(s.url, a["api_key"]).post({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                          "params": {"protocolVersion": "2025-06-18", "capabilities": {}}})
+    assert r.status_code == 401

@@ -56,6 +56,7 @@ MAX_OPEN_TENANTS = 256
 IDLE_CONNECTION_S = 75.0
 READ_TIMEOUT_S = 30.0
 
+_UNPARSABLE = object()  # a request body that is not JSON
 _API_KEY = re.compile(r"^ak_[\x21-\x7e]{1,125}$")  # ≤ 128 chars, like the hub's resolve-key
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 REASONS = {200: "OK", 202: "Accepted", 204: "No Content", 400: "Bad Request", 401: "Unauthorized",
@@ -609,13 +610,17 @@ class McpHttpServer:
         if origin and "*" not in self.cfg.allowed_origins and origin.rstrip("/") not in self.cfg.allowed_origins:
             raise HttpError(403, "origin not allowed")
 
-    async def _auth(self, req: Request, info: dict[str, Any]) -> tuple[str, Tenant]:
+    async def _auth(self, req: Request, info: dict[str, Any], *, fresh: bool = False) -> tuple[str, Tenant]:
+        """The request's key and tenant. `fresh` skips the resolver cache (a new session checks
+        that the key still works, e.g. right after the account was deleted)."""
         scheme, _, key = req.headers.get("authorization", "").partition(" ")
         key = key.strip()
         if scheme.lower() != "bearer" or not key:
             raise _unauthorized()
         if not _API_KEY.match(key):
             raise _unauthorized("invalid_token")
+        if fresh:
+            self.resolver.forget(key)
         try:
             tenant = await self.resolver.resolve(key)
         except Unauthorized:
@@ -665,7 +670,12 @@ class McpHttpServer:
 
     async def _post(self, req: Request, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                     info: dict[str, Any]) -> tuple[int, bool]:
-        key, tenant = await self._auth(req, info)
+        try:
+            body: Any = json.loads(req.body)
+        except ValueError:
+            body = _UNPARSABLE
+        # A new session re-checks the key without the cache (e.g. right after the account was deleted).
+        key, tenant = await self._auth(req, info, fresh=isinstance(body, dict) and body.get("method") == "initialize")
         ctype = req.headers.get("content-type", "application/json").split(";")[0].strip().lower()
         if ctype != "application/json":
             raise HttpError(415, "send application/json", rpc=True)
@@ -673,9 +683,7 @@ class McpHttpServer:
         if version is not None and version not in PROTOCOL_VERSIONS:
             raise HttpError(400, f"unsupported MCP-Protocol-Version {version}; supported: "
                             f"{', '.join(PROTOCOL_VERSIONS)}", rpc=True)
-        try:
-            body = json.loads(req.body)
-        except ValueError:
+        if body is _UNPARSABLE:
             await self._send(writer, 400, rpc_response(None, error=(-32700, "parse error")), keep_alive=req.keep_alive)
             return 400, True
         batch = isinstance(body, list)
