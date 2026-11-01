@@ -26,12 +26,12 @@ if (releaseKeystore == null && buildsRelease) {
 
 android {
     namespace = "dev.agentring.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.agentring.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         // Release builds pass both: -PversionName=0.2.0 -PversionCode=20099 (see docs/release.md).
         versionCode = providers.gradleProperty("versionCode").orNull?.toInt() ?: 1
         versionName = providers.gradleProperty("versionName").orNull ?: "0.2.0-dev"
