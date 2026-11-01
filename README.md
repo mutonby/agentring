@@ -6,7 +6,8 @@ you what's going on, you talk it through, and the agent gets the transcript and 
 on. You can also call your agents back from the app and ask them things by voice.
 
 Self-hosted and open source. No phone numbers, no Twilio, no per-minute fees: calls go
-over VoIP from your own server to your own phone.
+over VoIP from your own server to your own phone. Don't want to run a server? The hosted
+version is at [agentring.io](https://agentring.io) (contact: info@agentring.io).
 
 [![CI](https://github.com/mutonby/agentring/actions/workflows/ci.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/ci.yml)
 [![Android](https://github.com/mutonby/agentring/actions/workflows/android.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/android.yml)
