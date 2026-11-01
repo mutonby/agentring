@@ -32,14 +32,19 @@ export function dayStart(now = Date.now()): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-/** Answered call time this UTC month, in ms (an active call counts up to now). */
+/**
+ * Answered call time this UTC month, in ms: each call clipped to [month start, now], so
+ * an active call counts up to now and a call that started last month counts only its
+ * part in this month.
+ */
 export function callMsThisMonth(db: Db, now = Date.now()): number {
+  const start = monthStart(now);
   const r = db
     .prepare(
-      `SELECT COALESCE(SUM(MAX(0, MIN(COALESCE(ended_at, ?), ?) - answered_at)), 0) AS ms
-       FROM calls WHERE answered_at IS NOT NULL AND answered_at >= ?`,
+      `SELECT COALESCE(SUM(MAX(0, MIN(COALESCE(ended_at, ?), ?) - MAX(answered_at, ?))), 0) AS ms
+       FROM calls WHERE answered_at IS NOT NULL AND COALESCE(ended_at, ?) > ?`,
     )
-    .get(now, now, monthStart(now)) as { ms: number };
+    .get(now, now, start, now, start) as { ms: number };
   return Number(r.ms);
 }
 

@@ -169,6 +169,30 @@ describe("hub mode", () => {
     expect(t.json().usage.calls).toBe(1);
   });
 
+  it("applies a lowered call limit to the active call at once", async () => {
+    const a = await createTenant({ call_seconds_per_month: 3600 });
+    const dev = await pair(a.tid);
+    const call = await http("POST", `/t/${a.tid}/v1/calls`, a.auth, { reason: "test" });
+    const id = call.json.call.call_id as string;
+    await http("POST", `/t/${a.tid}/v1/calls/${id}/accept`, dev.headers);
+    await new Promise((r) => setTimeout(r, 1100));
+    await app.inject({ method: "PATCH", url: `/admin/v1/tenants/${a.tid}`, headers: ADMIN, payload: { limits: { call_seconds_per_month: 1 } } });
+    const ended = await http("GET", `/t/${a.tid}/v1/calls/${id}`, a.auth);
+    expect(ended.json.state).toBe("ended");
+    expect(ended.json.end_reason).toBe("quota");
+  });
+
+  it("does not bring back a tenant that is being deleted", async () => {
+    const a = await createTenant();
+    await http("GET", `/t/${a.tid}/v1/status`, a.auth); // loaded
+    const del = hub.delete(a.tid);
+    const during = await http("GET", `/t/${a.tid}/v1/status`, a.auth);
+    await del;
+    expect(during.status).toBe(404);
+    expect(existsSync(join(dir, "tenants", a.tid))).toBe(false);
+    expect((await http("GET", `/t/${a.tid}/v1/status`, a.auth)).status).toBe(404);
+  });
+
   it("routes the shared LiveKit webhook to the tenant in the room name", async () => {
     const a = await createTenant();
     const dev = await pair(a.tid);

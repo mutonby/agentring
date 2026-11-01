@@ -264,9 +264,14 @@ class CallSession:
     async def _send_loop(self) -> None:
         while True:
             await asyncio.sleep(0.02)
-            pcm = self.take_mixed_input()
-            if pcm:
-                await self.backend.send_audio(pcm)
+            await self.send_pending_input()
+
+    async def send_pending_input(self) -> None:
+        """Sends the waiting input in 40 ms chunks: a backlog (e.g. at the start of a call)
+        must not go out as one long chunk, which Phonic rejects (max 40 ms)."""
+        pcm = self.take_mixed_input()
+        for i in range(0, len(pcm), self._chunk):
+            await self.backend.send_audio(pcm[i : i + self._chunk])
 
     async def _play_loop(self) -> None:
         silence = b"\0" * self._frame

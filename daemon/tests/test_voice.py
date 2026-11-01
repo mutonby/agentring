@@ -248,6 +248,26 @@ def test_end_call_tool_and_specs():
     assert "end_call" not in asyncio.run(without())
 
 
+def test_a_backlog_goes_out_in_40_ms_chunks():
+    import numpy as np
+
+    async def run():
+        s = _session()
+        sent: list[int] = []
+
+        async def send_audio(pcm: bytes) -> None:
+            sent.append(len(pcm))
+
+        s.backend.send_audio = send_audio
+        chunk = 16_000 // 25  # samples per 40 ms
+        s.inputs["a"] = bytearray(np.zeros(chunk * 7 + 5, dtype=np.int16).tobytes())  # 280 ms waiting
+        await s.send_pending_input()
+        return sent, len(s.inputs["a"])
+
+    sent, left = asyncio.run(run())
+    assert sent == [1280] * 7 and left == 10
+
+
 def test_mixing_and_model_events():
     import numpy as np
 

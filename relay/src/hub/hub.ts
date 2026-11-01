@@ -212,6 +212,7 @@ export class Hub {
     const limits = patch.limits ? { ...t.record.limits, ...patch.limits } : undefined;
     this.registry.update(t.record.tenant_id, { agent_name: patch.agent_name, limits, disabled: patch.disabled });
     t.record = this.registry.get(t.record.tenant_id)!;
+    if (limits) t.built.ctx.calls?.limitsChanged();
     if (patch.agent_name !== undefined) t.built.ctx.cfg.agentName = patch.agent_name;
     // Turned off: drop every socket now; reconnects get 403 tenant_disabled.
     if (patch.disabled) t.built.ctx.hub.closeAll();
@@ -225,8 +226,9 @@ export class Hub {
   }
 
   async delete(tenantId: string): Promise<void> {
-    await this.unload(tenantId);
+    // Registry first: from here on no request can (re)load the tenant while it closes.
     this.registry.delete(tenantId);
+    await this.unload(tenantId);
     if (this.cfg.dataDir !== ":memory:") rmSync(this.tenantDir(tenantId), { recursive: true, force: true });
     this.log.info({ tenant: tenantId }, "tenant deleted");
   }

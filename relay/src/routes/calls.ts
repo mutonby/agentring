@@ -87,6 +87,8 @@ const notForThisDevice = () => forbidden("This call is for other devices");
 type PartState = "ringing" | "joined" | "declined" | "missed" | "left";
 /** LiveKit reports join times in its own clock (second precision on older servers). */
 const JOIN_CLOCK_SLACK_MS = 2_000;
+/** How often an active call is re-checked against the tenant's call-time limit, at most. */
+const QUOTA_CHECK_MS = 60_000;
 export class Calls {
   private readonly timers = new Map<string, NodeJS.Timeout>();
   /** Devices that already reported `ringing`, so the event is emitted once per device. */
@@ -147,19 +149,34 @@ export class Calls {
     this.quotaTimers.clear();
   }
 
-  /** The call just became active: if the tenant has a call-time limit, end the call when it runs out. */
+  /**
+   * The call just became active: if the tenant has a call-time limit, end the call when
+   * it runs out. The timer wakes at least every QUOTA_CHECK_MS, so a lowered limit, a new
+   * month or a raised limit (an upgrade) are all picked up during the call.
+   */
   private armQuota(callId: string): void {
     const left = callMsLeft(this.ctx.db, this.ctx.limits());
     if (left === undefined || this.quotaTimers.has(callId)) return;
+    if (left < 1000) {
+      this.finish(callId, "active", "ended", "relay", "quota");
+      return;
+    }
     const t = setTimeout(() => {
       this.quotaTimers.delete(callId);
-      // The limit may have been raised meanwhile (e.g. an upgrade): check again.
-      const again = callMsLeft(this.ctx.db, this.ctx.limits());
-      if (again === undefined || again >= 1000) return this.armQuota(callId);
-      this.finish(callId, "active", "ended", "relay", "quota");
-    }, left);
+      if (this.get(callId)?.state === "active") this.armQuota(callId);
+    }, Math.min(left, QUOTA_CHECK_MS));
     t.unref();
     this.quotaTimers.set(callId, t);
+  }
+
+  /** Limits changed (hub admin API): re-check the active call against them now. */
+  limitsChanged(): void {
+    for (const id of [...this.quotaTimers.keys()]) {
+      clearTimeout(this.quotaTimers.get(id));
+      this.quotaTimers.delete(id);
+    }
+    const c = this.open();
+    if (c?.state === "active") this.armQuota(c.call_id);
   }
 
   /** Whether a device may see this event; events of a targeted call only reach its phones. */
