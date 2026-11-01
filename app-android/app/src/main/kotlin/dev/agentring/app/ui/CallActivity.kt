@@ -209,7 +209,7 @@ fun CallScreen(
     Surface(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.radialGradient(listOf(Color(0xFF1C3A2C), Color(0xFF0C0F12)), radius = 1400f, center = androidx.compose.ui.geometry.Offset(540f, 0f))),
+            .background(Brush.radialGradient(listOf(Color(0xFF3A1F12), Color(0xFF0C0F12)), radius = 1400f, center = androidx.compose.ui.geometry.Offset(540f, 0f))),
         color = Color.Transparent,
         contentColor = Color.White,
     ) {
@@ -228,7 +228,7 @@ fun CallScreen(
             }
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(104.dp).background(Brush.linearGradient(listOf(Color(0xFF43D68F), Color(0xFF0B7A4B))), CircleShape),
+                modifier = Modifier.size(104.dp).background(Brush.linearGradient(listOf(Color(0xFFFF8A4C), Color(0xFFC2410C))), CircleShape),
             ) {
                 Text(info.agentName.trim().take(1).uppercase().ifEmpty { "A" }, fontSize = 44.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
             }

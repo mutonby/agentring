@@ -17,13 +17,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Same palette as the agentring.io website (warm neutrals + green accent), so the app and the
+// Same palette as the agentring.io website (warm neutrals + coral accent), so the app and the
 // site read as one product. Dynamic color is off on purpose: the brand stays recognisable.
 private val Light = lightColorScheme(
-    primary = Color(0xFF0B7A4B),
+    primary = Color(0xFFC2410C),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFDFF1E7),
-    onPrimaryContainer = Color(0xFF08663F),
+    primaryContainer = Color(0xFFFFE8DB),
+    onPrimaryContainer = Color(0xFF7A2A06),
     secondary = Color(0xFF4A4C55),
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFEFEDE6),
@@ -49,10 +49,10 @@ private val Light = lightColorScheme(
 )
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFF43D68F),
-    onPrimary = Color(0xFF06170E),
-    primaryContainer = Color(0xFF10291D),
-    onPrimaryContainer = Color(0xFF5FE3A2),
+    primary = Color(0xFFFF8A4C),
+    onPrimary = Color(0xFF2A0E00),
+    primaryContainer = Color(0xFF3A1A0A),
+    onPrimaryContainer = Color(0xFFFFD3BA),
     secondary = Color(0xFFB4B6BD),
     onSecondary = Color(0xFF15161A),
     secondaryContainer = Color(0xFF22262C),
