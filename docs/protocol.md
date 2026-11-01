@@ -12,7 +12,11 @@
 | **device** (the phone) | `device_jwt` (HS256, `iss`=`relay_id`, `sub`=`device_id`, `aud`=`device`) | `Authorization: Bearer eyJ…` |
 | LiveKit server | LiveKit webhook signature | `Authorization: <livekit jwt>` |
 
-The relay tells credentials apart by prefix (`ak_`) vs JWT shape. TLS is
+In hub mode the agent may also use a short-lived agent token `at_…` issued by the
+hub admin API ([cloud.md](cloud.md#admin-api)); it works like the API key until it
+expires.
+
+The relay tells credentials apart by prefix (`ak_`, `at_`) vs JWT shape. TLS is
 mandatory in production; the relay refuses to start with a non-`https` public
 URL unless `AGENTRING_INSECURE_DEV=1`.
 

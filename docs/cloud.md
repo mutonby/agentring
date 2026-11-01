@@ -80,16 +80,24 @@ Tenant  = { tenant_id, base_url, agent_name, limits: Limits, disabled: bool, cre
 | `POST /admin/v1/tenants/{tid}/api-key` | | `200 {api_key}` (old key stops working at once) |
 | `DELETE /admin/v1/tenants/{tid}` | | `204` (data deleted) |
 | `POST /admin/v1/tenants/{tid}/pairing-tokens` | `{ttl_s?}` | `201 PairingToken` (same shape as `/v1/pairing-tokens`) |
+| `POST /admin/v1/tenants/{tid}/agent-tokens` | `{ttl_s?}` (30–3600, default 600) | `201 {agent_token: "at_…", expires_at: ms}` |
 | `GET /admin/v1/tenants/{tid}/devices` | | `200 {devices: Device[]}` |
 | `DELETE /admin/v1/tenants/{tid}/devices/{device_id}` | | `204` |
-| `POST /admin/v1/resolve-key` | `{api_key}` | `200 {tenant_id, base_url}`, `404 not_found`, or `403 tenant_disabled` |
+| `POST /admin/v1/resolve-key` | `{api_key}` (an API key or an agent token) | `200 {tenant_id, base_url}`, `404 not_found`, or `403 tenant_disabled` |
+
+**Agent tokens** let the control plane act as a tenant's agent without keeping its API
+key (e.g. "send me a test message" / "call me now" buttons): `Authorization: Bearer at_…`
+works on the tenant's relay API and on `agentring mcp-http` exactly like the key, quotas
+included, until it expires. Only their SHA-256 is kept, in memory: rotating the key,
+deleting the tenant or restarting the relay revokes them.
 
 ## Remote MCP server
 
 `agentring mcp-http` serves the same tools as `agentring mcp` (`send_message`,
 `get_replies`, `call`, `status`) over MCP Streamable HTTP at `POST /mcp`.
 
-- **Auth:** `Authorization: Bearer ak_…` (the tenant's relay API key); anything else
+- **Auth:** `Authorization: Bearer ak_…` (the tenant's relay API key, or an agent token
+  `at_…` from the admin API); anything else
   gets `401` with `WWW-Authenticate: Bearer`.
 - **Which relay:** with `AGENTRING_HUB_ADMIN_URL` + admin token
   (`AGENTRING_HUB_ADMIN_TOKEN_FILE` or `AGENTRING_HUB_ADMIN_TOKEN`), the key is resolved

@@ -18,6 +18,8 @@ export class Auth {
     private readonly apiKeyHash: () => Buffer,
     jwtSecret: string,
     private readonly relayId: string,
+    /** Hub mode: whether a short-lived agent token (`at_…`, by its SHA-256) is valid for this tenant. */
+    private readonly agentToken?: (hash: Buffer) => boolean,
   ) {
     this.jwtKey = Buffer.from(jwtSecret, "base64url");
   }
@@ -40,6 +42,11 @@ export class Auth {
 
     if (token.startsWith("ak_")) {
       if (timingSafeEqual(sha256(token), this.apiKeyHash())) return { kind: "agent" };
+      throw unauthorized();
+    }
+
+    if (token.startsWith("at_")) {
+      if (this.agentToken?.(sha256(token))) return { kind: "agent" };
       throw unauthorized();
     }
 

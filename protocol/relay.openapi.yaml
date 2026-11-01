@@ -540,7 +540,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: "ak_<base64url>"
-      description: Daemon API key (AGENTRING_API_KEY).
+      description: >-
+        Daemon API key (AGENTRING_API_KEY). In hub mode, a short-lived agent token
+        (`at_<base64url>`, from the hub admin API) is accepted in its place.
     deviceJwt:
       type: http
       scheme: bearer
