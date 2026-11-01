@@ -41,14 +41,18 @@ class RelayClient:
             r = self._http.request(method, path, **kw)
         except httpx.HTTPError as e:
             raise RelayError(0, "unreachable", f"cannot reach relay at {self.relay_url}: {e}") from e
-        if r.status_code == 401:
-            self.unauthorized = True  # the key was revoked or rotated (the MCP HTTP server checks this)
         if r.status_code >= 400:
             try:
                 err = r.json()["error"]
-                raise RelayError(r.status_code, err.get("code", "error"), err.get("message", r.text))
-            except (ValueError, KeyError, TypeError):
-                raise RelayError(r.status_code, "error", r.text[:300]) from None
+                code, message = str(err.get("code", "error")), str(err.get("message", r.text))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                code, message = "error", r.text[:300]
+            # The key no longer opens this relay: rotated or revoked (401), or, on a hosted relay,
+            # the account was disabled (403 tenant_disabled) or deleted (404 "Tenant not found").
+            # The MCP HTTP server checks this to stop accepting the key.
+            if r.status_code == 401 or code == "tenant_disabled" or (r.status_code == 404 and message == "Tenant not found"):
+                self.unauthorized = True
+            raise RelayError(r.status_code, code, message)
         if r.status_code == 204 or not r.content:
             return None
         return r.json()

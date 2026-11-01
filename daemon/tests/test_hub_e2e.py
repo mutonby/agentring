@@ -83,3 +83,14 @@ def test_rotated_key_never_borrows_the_new_one(hub: str, start):
     assert not c_new.tool("status")["isError"]
     msgs = httpx.get(f"{a['tenant']['base_url']}/v1/messages", headers={"authorization": f"Bearer {new}"}).json()
     assert [m["text"] for m in msgs["messages"]] == ["with the new key"]
+
+
+def test_a_deleted_account_is_refused_at_once(hub: str, start):
+    a = new_tenant(hub)
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN)
+    c = Client(s.url, a["api_key"])
+    c.initialize()
+    assert not c.tool("status")["isError"]  # cached as valid
+    assert httpx.delete(f"{hub}/admin/v1/tenants/{a['tenant']['tenant_id']}", headers=ADMIN).status_code == 204
+    assert c.tool("status")["isError"]  # the relay says the tenant is gone...
+    assert c.post({"jsonrpc": "2.0", "id": 99, "method": "ping"}).status_code == 401  # ...so the key is dropped
