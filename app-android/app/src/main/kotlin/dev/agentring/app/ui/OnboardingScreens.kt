@@ -25,6 +25,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -334,6 +340,16 @@ private fun PairPage(setup: Setup, onPaired: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showPaste by rememberSaveable { mutableStateOf(false) }
+    // The paste field opens below the steps, out of sight on most phones: scroll to it and focus it.
+    val pasteInView = remember { BringIntoViewRequester() }
+    val pasteFocus = remember { FocusRequester() }
+    LaunchedEffect(showPaste) {
+        if (showPaste) {
+            delay(300) // let AnimatedVisibility lay the field out first
+            pasteInView.bringIntoView()
+            runCatching { pasteFocus.requestFocus() }
+        }
+    }
 
     fun pair(raw: String) {
         if (busy) return
@@ -412,7 +428,7 @@ private fun PairPage(setup: Setup, onPaired: () -> Unit) {
                     minLines = 2,
                     maxLines = 4,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    modifier = Modifier.fillMaxWidth().testTag("pairing_code"),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewRequester(pasteInView).focusRequester(pasteFocus).testTag("pairing_code"),
                 )
                 OutlinedButton(
                     onClick = { pair(code) },
