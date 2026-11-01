@@ -36,8 +36,8 @@ android {
         versionCode = providers.gradleProperty("versionCode").orNull?.toInt() ?: 1
         versionName = providers.gradleProperty("versionName").orNull ?: "0.2.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Hosted agentring (docs/cloud.md), linked from the pairing screen; empty hides the link.
-        val cloudUrl = providers.gradleProperty("agentringCloudUrl").orNull ?: ""
+        // Hosted agentring (docs/cloud.md), offered in the setup tutorial; -PagentringCloudUrl= (empty) hides it.
+        val cloudUrl = providers.gradleProperty("agentringCloudUrl").orNull ?: "https://agentring.io"
         require(cloudUrl.isEmpty() || cloudUrl.startsWith("https://")) { "agentringCloudUrl must be https://" }
         buildConfigField("String", "CLOUD_URL", "\"$cloudUrl\"")
     }

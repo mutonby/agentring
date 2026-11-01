@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -204,7 +206,13 @@ fun CallScreen(
     onSpeaker: () -> Unit,
 ) {
     val info = state.info
-    Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF101418), contentColor = Color.White) {
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.radialGradient(listOf(Color(0xFF1C3A2C), Color(0xFF0C0F12)), radius = 1400f, center = androidx.compose.ui.geometry.Offset(540f, 0f))),
+        color = Color.Transparent,
+        contentColor = Color.White,
+    ) {
         Column(
             Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 32.dp, vertical = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -218,6 +226,13 @@ fun CallScreen(
                 )
                 Spacer(Modifier.height(16.dp))
             }
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(104.dp).background(Brush.linearGradient(listOf(Color(0xFF43D68F), Color(0xFF0B7A4B))), CircleShape),
+            ) {
+                Text(info.agentName.trim().take(1).uppercase().ifEmpty { "A" }, fontSize = 44.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            }
+            Spacer(Modifier.height(20.dp))
             Text(info.agentName, fontSize = 34.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.testTag("call_agent"))
             Spacer(Modifier.height(10.dp))
             Text(statusText(state), fontSize = 18.sp, color = Color(0xFFB8C4CC), modifier = Modifier.testTag("call_status"))

@@ -120,15 +120,27 @@ class M1EndToEndTest {
         // 1. Pair through the UI with a code from the relay (what `agentring pair` prints).
         val qr = agent("POST", "/v1/pairing-tokens", "{}")["qr_payload"]!!.jsonPrimitive.content
         compose.onNodeWithTag("get_started").performClick()
+        // Setup tutorial: "cloud or own server" (only when the build links a cloud), then the pairing page.
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(hasTestTag("setup_self").or(hasTestTag("show_paste"))).fetchSemanticsNodes().isNotEmpty()
+        }
+        if (compose.onAllNodes(hasTestTag("setup_self")).fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithTag("setup_self").performClick()
+        }
+        waitForTag("show_paste")
+        compose.onNodeWithTag("show_paste").performClick()
         waitForTag("pairing_code")
         screenshot("01-pair")
-        compose.onNodeWithTag("pairing_code").performTextInput(qr)
-        compose.onNodeWithTag("pair_button").performClick()
-        waitForTag("continue", timeoutMs = 20_000)
+        compose.onNodeWithTag("pairing_code").performScrollTo().performTextInput(qr)
+        compose.onNodeWithTag("pair_button").performScrollTo().performClick()
+        // Call readiness page, then "try it".
+        waitForTag("calls_next", timeoutMs = 20_000)
+        screenshot("02-calls")
+        compose.onNodeWithTag("calls_next").performClick()
+        waitForTag("continue")
         screenshot("02-paired")
         val pairing = assertNotNull_(Graph.pairing.current)
-        // The call-readiness checklist sits above the button, so it may be off screen.
-        compose.onNodeWithTag("continue").performScrollTo().performClick()
+        compose.onNodeWithTag("continue").performClick()
 
         // 2. Home shows a live connection to the relay.
         waitForTag("relay_status", context.getString(R.string.connected), timeoutMs = 20_000)

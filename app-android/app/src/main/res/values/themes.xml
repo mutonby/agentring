@@ -3,6 +3,8 @@
     <style name="Theme.Agentring" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
-    <color name="launcher_background">#1F1B3A</color>
+    <color name="launcher_background">#0B7A4B</color>
+    <color name="window_background">#F7F6F2</color>
 </resources>

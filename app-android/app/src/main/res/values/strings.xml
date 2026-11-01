@@ -1,27 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">agentring</string>
+    <string name="app_name" translatable="false">agentring</string>
     <string name="you">You</string>
 
     <!-- Onboarding -->
-    <string name="welcome_title">Your agent can call you</string>
-    <string name="welcome_body">agentring lets your AI agent (Claude Code, OpenClaw, n8n, scripts…) send you messages and call you like a real phone call, and lets you call it back. Everything goes through your own relay.</string>
+    <string name="welcome_title">Your AI agent can call you</string>
+    <string name="welcome_body">Claude Code, Codex, OpenClaw, n8n or your own scripts can message you and ring your phone like a real call. No phone number needed.</string>
     <string name="get_started">Get started</string>
-    <string name="notif_title">Allow notifications</string>
-    <string name="notif_body">Messages from your agent arrive as notifications you can reply to directly.</string>
-    <string name="allow">Allow</string>
-    <string name="skip">Skip</string>
-    <string name="pair_title">Pair with your agent</string>
-    <string name="pair_body">Scan the QR code from your agentring dashboard, or from <b>agentring pair</b> on your own server. You can also paste the pairing code.</string>
-    <string name="use_cloud">No server? Use agentring cloud</string>
+    <string name="pair_title">Pair your phone</string>
     <string name="scan_qr">Scan QR code</string>
-    <string name="or_paste">or paste the pairing code</string>
+    <string name="or_paste">Can\'t scan? Paste the code</string>
     <string name="pairing_code">Pairing code</string>
     <string name="pair">Pair</string>
     <string name="pairing">Pairing…</string>
     <string name="scan_failed">Could not scan: %1$s</string>
     <string name="done_title">Paired with %1$s</string>
-    <string name="done_body">Try it from your computer:\n\nagentring msg "hello"\nagentring call "test"</string>
     <string name="done_no_push">Push notifications are not configured on your relay, so messages only arrive while the app is open. See docs/firebase.md.</string>
     <string name="continue_">Continue</string>
 
@@ -59,7 +52,7 @@
     <string name="pair_again">Pair again</string>
 
     <!-- Messages -->
-    <string name="messages_empty">No messages yet.\nFrom your computer run:\nagentring msg "hello"</string>
+    <string name="messages_empty">When %1$s writes to you, it shows up here. You can also write to it first.</string>
     <string name="message_hint">Reply to %1$s</string>
     <string name="send">Send</string>
     <string name="read">Read</string>
@@ -69,7 +62,6 @@
     <string name="settings_relay">Relay</string>
     <string name="settings_agent">Agent</string>
     <string name="settings_device">Device ID</string>
-    <string name="settings_version">App version</string>
     <string name="test_notification">Send a test notification</string>
     <string name="unpair">Unpair this phone</string>
     <string name="unpair_confirm">Forget the pairing on this phone? To also revoke it on the relay run: agentring devices revoke %1$s</string>
@@ -112,12 +104,75 @@
     <string name="perm_full_screen">Full-screen calls on the lock screen</string>
     <string name="perm_battery">Unrestricted battery use</string>
     <string name="perm_background">Background activity allowed</string>
-    <string name="perm_dnd">Ring urgent calls in Do Not Disturb (optional)</string>
-    <string name="perm_fix">Fix</string>
-    <string name="perm_ok">OK</string>
-    <string name="perm_optional">Optional</string>
+    <string name="perm_dnd">Ring urgent calls in Do Not Disturb</string>
+    <string name="perm_fix">Allow</string>
     <string name="perm_oem_hint">On Xiaomi, Samsung, Huawei and other phones with aggressive battery savers, also enable Autostart / \"Never sleeping apps\" for agentring. See dontkillmyapp.com.</string>
     <string name="settings_calls">Calls</string>
     <string name="settings_use_telecom">Use Android\'s call system</string>
     <string name="settings_use_telecom_hint">Bluetooth headset buttons, watches and cars. Turn off only if calls misbehave on this phone.</string>
+
+    <!-- Setup tutorial and redesign -->
+    <string name="welcome_footer">Setup takes about 2 minutes.</string>
+    <string name="feature_messages_title">Messages</string>
+    <string name="feature_messages_body">Your agent texts you. Reply straight from the notification.</string>
+    <string name="feature_calls_title">Real calls</string>
+    <string name="feature_calls_body">It rings even with the phone locked, like any call.</string>
+    <string name="feature_callback_title">Call it back</string>
+    <string name="feature_callback_body">Tap once to talk to your agent by voice.</string>
+    <string name="back">Back</string>
+    <string name="step_of">Step %1$d of %2$d</string>
+    <string name="how_title">How do you want to connect?</string>
+    <string name="how_body">Your phone talks to your agent through a small server called a relay.</string>
+    <string name="how_cloud_title">agentring cloud</string>
+    <string name="how_cloud_badge">EASIEST</string>
+    <string name="how_cloud_body">Nothing to install. Sign in on the website and connect your agent with one command.</string>
+    <string name="how_self_title">My own server</string>
+    <string name="how_self_badge">FREE</string>
+    <string name="how_self_body">Run the open-source relay with Docker on your computer or server.</string>
+    <string name="how_hint">You can switch later by pairing again.</string>
+    <string name="pair_body_cloud">Three quick steps on your computer.</string>
+    <string name="pair_body_self">Three quick steps on the computer that runs your agent.</string>
+    <string name="pair_cloud_1">Sign in on agentring.io</string>
+    <string name="pair_cloud_1_body">On your computer, open the website and sign in with your email. No password.</string>
+    <string name="open_cloud">Open %1$s</string>
+    <string name="pair_cloud_2">Show the pairing QR</string>
+    <string name="pair_cloud_2_body">In your dashboard, under Pair a phone, press Show pairing QR.</string>
+    <string name="pair_scan_step">Scan it with this phone</string>
+    <string name="pair_scan_step_body">Tap Scan QR code below and point the camera at the screen.</string>
+    <string name="pair_self_1">Start your relay</string>
+    <string name="pair_self_1_body">In the agentring folder (see the README on GitHub):</string>
+    <string name="pair_self_2">Create a pairing code</string>
+    <string name="pair_self_2_body">It prints a QR code in the terminal:</string>
+    <string name="calls_title">Make sure it rings</string>
+    <string name="calls_body">Calls should ring even when the phone is locked and asleep. Allow what\'s missing below.</string>
+    <string name="calls_later">Skip for now</string>
+    <string name="done_subtitle">Your phone is ready. Let\'s try it.</string>
+    <string name="try_it">Try it</string>
+    <string name="try_cloud_1">Connect your agent</string>
+    <string name="try_cloud_1_body">In your dashboard, copy the command for Claude Code, Codex or any MCP client and run it on your computer.</string>
+    <string name="try_cloud_2">Ask it to call you</string>
+    <string name="try_cloud_2_body">For example: “Call me when the tests finish.”</string>
+    <string name="try_self_1">Send yourself a message</string>
+    <string name="try_self_2">Make a test call</string>
+    <string name="try_self_3">Connect your agent</string>
+    <string name="try_self_3_body">For example, Claude Code:</string>
+    <string name="open_app">Open agentring</string>
+    <string name="copy">Copy</string>
+    <string name="connection">Connection</string>
+    <string name="agent_online">Online</string>
+    <string name="agent_offline">Offline</string>
+    <string name="agent_unknown">Checking…</string>
+    <string name="call_agent_named">Call %1$s</string>
+    <string name="messages_empty_title">No messages yet</string>
+    <string name="settings_pairing">Pairing</string>
+    <string name="settings_more">More</string>
+    <string name="open_dashboard">Open my dashboard</string>
+    <string name="settings_footer">agentring %1$s · open source, Apache-2.0</string>
+    <string name="perm_notifications_why">To show messages and incoming calls.</string>
+    <string name="perm_microphone_why">So your agent can hear you.</string>
+    <string name="perm_full_screen_why">Shows the call screen over the lock screen.</string>
+    <string name="perm_battery_why">Stops Android from delaying calls to save battery.</string>
+    <string name="perm_background_why">Lets the call start while the app is closed.</string>
+    <string name="perm_dnd_why">Urgent calls ring even in Do Not Disturb.</string>
+    <string name="perm_optional_why">Optional. %1$s</string>
 </resources>
