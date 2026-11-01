@@ -397,3 +397,46 @@ def test_call_cap_answers_busy(relay: str, start, monkeypatch):
     c = Client(s.url)
     res = c.tool("call", reason="test")
     assert res["isError"] and res["content"][0]["text"].startswith("busy")
+
+
+def test_bad_ids_and_long_keys(relay: str, start):
+    s = start(relay_url=relay)
+    c = Client(s.url)
+    c.initialize()
+    # Lists/objects are not JSON-RPC ids: refused, and the server keeps working.
+    for bad in ([1], {"a": 1}, True):
+        r = c.post({"jsonrpc": "2.0", "id": bad, "method": "tools/call", "params": {"name": "status", "arguments": {}}})
+        assert r.status_code == 400, r.text
+    r = c.post({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": [1]}})
+    assert r.status_code == 202
+    assert c.request("ping")["result"] == {}
+    assert s.server.pool._open[next(iter(s.server.pool._open))].active == 0  # no leaked slot
+    # Keys longer than the hub accepts are a 401, not a 503.
+    long = Client(s.url, key="ak_" + "x" * 200)
+    assert long.post({"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code == 401
+
+
+def test_stdio_refuses_bad_ids():
+    from agentring.mcp_server import McpServer
+
+    sent: list[dict] = []
+    srv = McpServer(None, lambda line: sent.append(json.loads(line)))  # type: ignore[arg-type]
+    asyncio.run(srv.handle(json.dumps({"jsonrpc": "2.0", "id": [1], "method": "tools/call"})))
+    asyncio.run(srv.handle(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": {}}})))
+    assert sent == [{"jsonrpc": "2.0", "id": None, "error": {"code": -32600,
+                                                            "message": "invalid request: id must be a string or a number"}}]
+
+
+def test_cancelled_get_replies_does_not_swallow_a_reply(relay: str, tmp_path: Path):
+    from agentring.mcp_server import AgentringTools
+    from agentring.store import Store
+
+    with RelayClient(relay, API_KEY) as rc:
+        phone = simulate_phone_pairing(rc.create_pairing_token()["qr_payload"])
+        httpx.post(f"{relay}/v1/messages", headers=phone["headers"], json={"text": "reply"})
+        tools = AgentringTools(RelayClient(relay, API_KEY), Store(tmp_path / "s.db"), agents_file=None)
+        cancelled = threading.Event()
+        cancelled.set()  # the request was cancelled while the thread was fetching
+        assert tools._new_replies(cancelled) == []
+        assert [r["text"] for r in asyncio.run(tools.get_replies())["replies"]] == ["reply"]
+        tools.close()

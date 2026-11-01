@@ -36,8 +36,8 @@ import httpx
 
 from . import __version__
 from .config import ConfigError, home_dir
-from .mcp_server import (PROTOCOL_VERSIONS, AgentringTools, CallSlots, handle_rpc, initialize_result, is_request,
-                         rpc_response)
+from .mcp_server import (PROTOCOL_VERSIONS, AgentringTools, CallSlots, bad_request_id, cancelled_request_id,
+                         handle_rpc, initialize_result, is_request, rpc_response)
 from .relay_client import RelayClient
 from .store import Store
 
@@ -56,7 +56,7 @@ MAX_OPEN_TENANTS = 256
 IDLE_CONNECTION_S = 75.0
 READ_TIMEOUT_S = 30.0
 
-_API_KEY = re.compile(r"^ak_[\x21-\x7e]{1,500}$")
+_API_KEY = re.compile(r"^ak_[\x21-\x7e]{1,125}$")  # ≤ 128 chars, like the hub's resolve-key
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 REASONS = {200: "OK", 202: "Accepted", 204: "No Content", 400: "Bad Request", 401: "Unauthorized",
            403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 408: "Request Timeout",
@@ -261,18 +261,20 @@ class KeyResolver:
 
 @dataclass
 class _Open:
-    tools: AgentringTools
-    key: str  # hash of the API key its client uses
+    tools: AgentringTools  # the tenant's store and locks; each request gets a view with its own key's client
+    relay_url: str
+    clients: dict[str, RelayClient] = field(default_factory=dict)  # by hash of the API key
     active: int = 0
     last_used: float = 0.0
-    retired: list[RelayClient] = field(default_factory=list)  # old clients (key rotated), closed when idle
+    retired: list[RelayClient] = field(default_factory=list)  # clients of dropped keys, closed when idle
 
 
 class TenantPool:
-    """One `AgentringTools` per tenant (shared by all its sessions, so a reply is returned once):
-    its relay client, and a Store (SQLite) under `data_dir/tenants/` that mirrors the tenant's
-    messages and remembers which replies get_replies returned. Idle tenants are closed when
-    more than `max_open` are open; their state stays on disk."""
+    """One store per tenant (shared by all its sessions, so a reply is returned once): a SQLite
+    file under `data_dir/tenants/` that mirrors the tenant's messages and remembers which replies
+    get_replies returned. Each API key gets its own relay client, so a request never runs with
+    another request's credentials (e.g. the old and new key during a rotation). Idle tenants are
+    closed when more than `max_open` are open; their state stays on disk."""
 
     def __init__(self, data_dir: Path, *, call_slots: CallSlots, poll_s: float = 2.0, max_open: int = MAX_OPEN_TENANTS):
         self.dir = data_dir / "tenants"
@@ -289,44 +291,57 @@ class TenantPool:
 
     def acquire(self, tenant: Tenant, api_key: str) -> AgentringTools:
         e = self._open.get(tenant.tenant_id)
-        h = key_hash(api_key)
+        if e is not None and e.relay_url != tenant.base_url:  # the tenant moved: start its clients over
+            e.retired.extend(e.clients.values())
+            e.clients.clear()
+            e.relay_url = tenant.base_url
         if e is None:
             self._evict()
-            tools = AgentringTools(RelayClient(tenant.base_url, api_key), Store(self.dir / f"{tenant.tenant_id}.db"),
+            client = RelayClient(tenant.base_url, api_key)
+            tools = AgentringTools(client, Store(self.dir / f"{tenant.tenant_id}.db"),
                                    relay_url=tenant.base_url, poll_s=self.poll_s, agents_file=None,
                                    call_slots=self.call_slots)
-            e = self._open[tenant.tenant_id] = _Open(tools, h)
-        elif e.key != h or e.tools.relay_url != tenant.base_url:  # key rotated (or the tenant moved)
-            e.retired.append(e.tools.client)
-            e.tools.client = RelayClient(tenant.base_url, api_key)
-            e.tools.relay_url = tenant.base_url
-            e.key = h
+            e = self._open[tenant.tenant_id] = _Open(tools, tenant.base_url, {key_hash(api_key): client})
+        h = key_hash(api_key)
+        client = e.clients.get(h)
+        if client is None:
+            client = e.clients[h] = RelayClient(tenant.base_url, api_key)
         e.active += 1
         e.last_used = time.monotonic()
-        return e.tools
+        return e.tools.with_client(client, tenant.base_url)
 
-    def release(self, tenant_id: str) -> None:
+    def release(self, tenant_id: str, api_key: str | None = None) -> bool:
+        """Done with a request. Returns True when the relay refused that request's key (it was
+        rotated or revoked): its client is dropped, and the caller should forget the key."""
         e = self._open.get(tenant_id)
         if e is None:
-            return
+            return False
+        refused = False
+        if api_key is not None:
+            h = key_hash(api_key)
+            c = e.clients.get(h)
+            if c is not None and c.unauthorized:
+                e.retired.append(e.clients.pop(h))
+                refused = True
         e.active = max(0, e.active - 1)
         e.last_used = time.monotonic()
-        if e.active == 0:
+        if e.active == 0 and not e.tools.busy:
             for c in e.retired:
                 c.close()
             e.retired.clear()
+        return refused
 
     def _evict(self) -> None:
         if len(self._open) < self.max_open:
             return
-        idle = sorted((e.last_used, tid) for tid, e in self._open.items() if e.active == 0)
+        idle = sorted((e.last_used, tid) for tid, e in self._open.items() if e.active == 0 and not e.tools.busy)
         for _, tid in idle[: max(1, len(self._open) - self.max_open + 1)]:
             self._close(self._open.pop(tid))
 
     def _close(self, e: _Open) -> None:
-        for c in e.retired:
+        for c in [*e.retired, *e.clients.values()]:
             c.close()
-        e.tools.close()
+        e.tools.store.close()
 
     def close_all(self) -> None:
         for e in self._open.values():
@@ -681,11 +696,14 @@ class McpHttpServer:
                              keep_alive=req.keep_alive)
             return 200, True
 
+        if any(bad_request_id(m) for m in msgs):
+            raise HttpError(400, "invalid request: id must be a string or a number", rpc=True)
         session = self._session(req, tenant)
         requests = [m for m in msgs if is_request(m)]
         for m in msgs:
-            if m.get("method") == "notifications/cancelled" and session is not None:
-                t = session.running.get((m.get("params") or {}).get("requestId"))
+            rid = cancelled_request_id(m)
+            if rid is not None and session is not None:
+                t = session.running.get(rid)
                 if t is not None:
                     t.cancel()
         if not requests:
@@ -701,7 +719,7 @@ class McpHttpServer:
             tasks.append((m, t))
             if session is not None:
                 session.running[m["id"]] = t
-        done_all = asyncio.ensure_future(self._finish(tenant, session, tasks))
+        done_all = asyncio.ensure_future(self._finish(tenant, key, session, tasks))
         self._background.add(done_all)
         done_all.add_done_callback(self._background.discard)
 
@@ -717,7 +735,8 @@ class McpHttpServer:
         await self._stream(writer, reader, tasks)
         return 200, False
 
-    async def _finish(self, tenant: Tenant, session: Session | None, tasks: list[tuple[dict[str, Any], asyncio.Task]]) -> None:
+    async def _finish(self, tenant: Tenant, key: str, session: Session | None,
+                      tasks: list[tuple[dict[str, Any], asyncio.Task]]) -> None:
         """Releases the tenant once every request of a POST is done (even after the client left)."""
         try:
             await asyncio.gather(*(t for _, t in tasks), return_exceptions=True)
@@ -726,7 +745,8 @@ class McpHttpServer:
                 for m, t in tasks:
                     if session.running.get(m["id"]) is t:
                         session.running.pop(m["id"], None)
-            self.pool.release(tenant.tenant_id)
+            if self.pool.release(tenant.tenant_id, key):
+                self.resolver.forget(key)  # rotated or revoked: the next request gets an HTTP 401
 
     async def _stream(self, writer: asyncio.StreamWriter, reader: asyncio.StreamReader,
                       tasks: list[tuple[dict[str, Any], asyncio.Task]]) -> None:

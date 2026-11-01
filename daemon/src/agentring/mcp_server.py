@@ -13,6 +13,7 @@ carries only protocol messages.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import sys
@@ -82,6 +83,23 @@ class ToolError(Exception):
     """Reported to the agent as a tool error (isError), not a protocol error."""
 
 
+class _Busy:
+    """A thread-safe counter used as a context manager around worker-thread work."""
+
+    def __init__(self) -> None:
+        self.n = 0
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> _Busy:
+        with self._lock:
+            self.n += 1
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        with self._lock:
+            self.n -= 1
+
+
 class CallSlots:
     """A cap on concurrent voice calls, shared by every user of one server (each call holds a
     voice AI session and its audio). Used from the event loop only."""
@@ -122,6 +140,7 @@ class AgentringTools:
         self.poll_s = poll_s
         self._call_lock = asyncio.Lock()
         self._db = threading.Lock()  # tool calls run concurrently, each in a thread
+        self._busy = _Busy()  # worker threads still running (also ones whose request was cancelled)
 
     @classmethod
     def from_settings(cls, settings: Settings, **kw: Any) -> AgentringTools:
@@ -143,13 +162,28 @@ class AgentringTools:
         with self._db:
             self.store.upsert_message(m["msg_id"], "agent", m["text"], m["created_at"], m.get("reply_to"))
 
-    def _new_replies(self) -> list[dict[str, Any]]:
-        with self._db:
-            return self._take_replies()
+    @property
+    def busy(self) -> bool:
+        """A worker thread still uses the store or a client (see `with_client`)."""
+        return self._busy.n > 0
 
-    def _take_replies(self) -> list[dict[str, Any]]:
+    def with_client(self, client: RelayClient, relay_url: str | None = None) -> AgentringTools:
+        """The same tools (store, locks, call slot) with another relay client: the HTTP server
+        gives each request the client of the key it came with."""
+        view = copy.copy(self)
+        view.client = client
+        view.relay_url = relay_url or client.relay_url
+        return view
+
+    def _new_replies(self, cancelled: threading.Event | None = None) -> list[dict[str, Any]]:
+        with self._busy, self._db:
+            return self._take_replies(cancelled)
+
+    def _take_replies(self, cancelled: threading.Event | None = None) -> list[dict[str, Any]]:
         catch_up(self.client, self.store)
         rows = self.store.replies(since=None, undelivered_only=True, limit=100)
+        if cancelled is not None and cancelled.is_set():
+            return []  # nobody will get them: leave them for the next get_replies
         if rows:
             self.store.mark_delivered([r["msg_id"] for r in rows], int(time.time() * 1000))
             for r in rows:
@@ -164,7 +198,12 @@ class AgentringTools:
     async def get_replies(self, wait_s: int = 0) -> dict[str, Any]:
         deadline = time.monotonic() + max(0, min(int(wait_s), 3600))
         while True:
-            replies = await asyncio.to_thread(self._new_replies)
+            cancelled = threading.Event()
+            try:
+                replies = await asyncio.to_thread(self._new_replies, cancelled)
+            except asyncio.CancelledError:
+                cancelled.set()  # the thread goes on, but won't mark anything as returned
+                raise
             if replies or time.monotonic() >= deadline:
                 return {"replies": replies}
             await asyncio.sleep(self.poll_s)
@@ -232,9 +271,28 @@ class AgentringTools:
 TOOL_NAMES = frozenset(t["name"] for t in TOOLS)
 
 
+def valid_id(rid: Any) -> bool:
+    """JSON-RPC ids are strings or numbers (null is only for errors)."""
+    return isinstance(rid, str) or (isinstance(rid, (int, float)) and not isinstance(rid, bool))
+
+
 def is_request(m: Any) -> bool:
     """A JSON-RPC request (needs a response); notifications and responses are not."""
     return isinstance(m, dict) and "method" in m and m.get("id") is not None
+
+
+def bad_request_id(m: Any) -> bool:
+    """A request whose id is not a string or number: answered with -32600 and id null."""
+    return is_request(m) and not valid_id(m["id"])
+
+
+def cancelled_request_id(m: Any) -> Any:
+    """The requestId of a notifications/cancelled, if it is a usable id."""
+    if isinstance(m, dict) and m.get("method") == "notifications/cancelled":
+        params = m.get("params")
+        rid = params.get("requestId") if isinstance(params, dict) else None
+        return rid if valid_id(rid) else None
+    return None
 
 
 def rpc_response(rid: Any, result: Any = None, error: tuple[int, str] | None = None) -> dict[str, Any]:
@@ -332,11 +390,14 @@ class McpServer:
             await self._dispatch(m)
 
     async def _dispatch(self, m: Any) -> None:
+        if bad_request_id(m):
+            await self.send(rpc_response(None, error=(-32600, "invalid request: id must be a string or a number")))
+            return
         if not is_request(m):
-            if isinstance(m, dict) and m.get("method") == "notifications/cancelled":
-                t = self._running.get((m.get("params") or {}).get("requestId"))
-                if t:
-                    t.cancel()
+            rid = cancelled_request_id(m)
+            t = self._running.get(rid) if rid is not None else None
+            if t:
+                t.cancel()
             return  # other notifications, a response to us (we send no requests) or junk
         if m["method"] == "tools/call":
             # Each call in its own task: a phone call takes minutes and must not block pings or messages.

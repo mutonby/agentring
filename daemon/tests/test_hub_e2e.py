@@ -61,3 +61,25 @@ def test_mcp_http_against_a_hub(hub: str, start):
     assert httpx.patch(f"{hub}/admin/v1/tenants/{tid_b}", headers=ADMIN, json={"disabled": True}).status_code == 200
     s2 = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN)  # fresh key cache
     assert Client(s2.url, b["api_key"]).post({"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code == 401
+
+
+def test_rotated_key_never_borrows_the_new_one(hub: str, start):
+    a = new_tenant(hub)
+    tid, old = a["tenant"]["tenant_id"], a["api_key"]
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, poll_s=0.3)
+    c_old = Client(s.url, old)
+    c_old.initialize()
+    assert not c_old.tool("status")["isError"]  # the old key is now cached as valid
+
+    new = httpx.post(f"{hub}/admin/v1/tenants/{tid}/api-key", headers=ADMIN).json()["api_key"]
+    c_new = Client(s.url, new)
+    c_new.initialize()
+    assert not c_new.tool("send_message", text="with the new key")["isError"]
+    # The old key must not ride on the new key's client: the relay refuses it...
+    refused = c_old.tool("send_message", text="with the old key")
+    assert refused["isError"] and "401" in refused["content"][0]["text"]
+    # ...and from then on the MCP server refuses it too, while the new key keeps working.
+    assert c_old.post({"jsonrpc": "2.0", "id": 99, "method": "ping"}).status_code == 401
+    assert not c_new.tool("status")["isError"]
+    msgs = httpx.get(f"{a['tenant']['base_url']}/v1/messages", headers={"authorization": f"Bearer {new}"}).json()
+    assert [m["text"] for m in msgs["messages"]] == ["with the new key"]

@@ -19,6 +19,7 @@ class RelayError(Exception):
 class RelayClient:
     def __init__(self, relay_url: str, api_key: str, *, timeout: float = 15.0, transport: httpx.BaseTransport | None = None):
         self.relay_url = relay_url.rstrip("/")
+        self.unauthorized = False
         self._http = httpx.Client(
             base_url=self.relay_url,
             headers={"authorization": f"Bearer {api_key}", "user-agent": f"agentring-daemon/{__version__}"},
@@ -40,6 +41,8 @@ class RelayClient:
             r = self._http.request(method, path, **kw)
         except httpx.HTTPError as e:
             raise RelayError(0, "unreachable", f"cannot reach relay at {self.relay_url}: {e}") from e
+        if r.status_code == 401:
+            self.unauthorized = True  # the key was revoked or rotated (the MCP HTTP server checks this)
         if r.status_code >= 400:
             try:
                 err = r.json()["error"]
