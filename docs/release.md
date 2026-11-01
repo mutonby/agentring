@@ -184,9 +184,9 @@ for new apps and updates from 2026-08-31.
 
 Play Console items this app needs:
 
-- **Privacy policy:** `https://agentring.io/privacy.html`. **Account deletion:** accounts
-  exist only on agentring cloud; deletion is in the dashboard (`https://agentring.io/app`,
-  "Delete account"). Self-hosted users have no account.
+- **Privacy policy:** `https://agentring.io/privacy`. **Account deletion:**
+  `https://agentring.io/delete-account` (accounts exist only on agentring cloud; they are
+  deleted from the dashboard or by email). Self-hosted users have no account.
 - **Full-screen intent** (`USE_FULL_SCREEN_INTENT`): declare "calling app" — incoming calls
   show over the lock screen.
 - **Foreground service types** `phoneCall` and `microphone`: declare them with a short video

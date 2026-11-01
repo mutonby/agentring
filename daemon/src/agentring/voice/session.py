@@ -321,7 +321,7 @@ class CallSession:
                 text = self.partial[role].strip()
                 if text:
                     self.transcript.append((role, text))
-                    log.info("%s: %s", role, text[:200])
+                    log.debug("%s: %s", role, text[:200])  # what was said stays out of production logs
                 self.partial[role] = ""
         elif isinstance(ev, SessionEnding):
             log.warning("the model will close the session soon: %s", ev.detail)
