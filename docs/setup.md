@@ -114,9 +114,11 @@ the daemon on the VPS instead, next to the relay, see the `daemon` profile at th
 
 ## 4. The app
 
-1. On the phone, download `agentring.apk` from the
+1. On the phone, install agentring from
+   [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app). Without Play, download `agentring.apk` from the
    [latest release](https://github.com/mutonby/agentring/releases) and install it (Android
-   asks you to allow installs from your browser once).
+   asks you to allow installs from your browser once). The two are signed with different
+   keys, so to switch from one to the other, uninstall the app first.
 2. Open it and tap **Get started**. It asks, one by one, for notifications, the microphone,
    full-screen calls on the lock screen and unrestricted battery use: allow them all.
 3. On your computer, run `agentring pair`. Scan the QR code it shows with the app, or copy
