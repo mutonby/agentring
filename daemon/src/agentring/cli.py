@@ -31,13 +31,16 @@ devices_app = typer.Typer(help="List or revoke paired phones.", no_args_is_help=
 app.add_typer(devices_app, name="devices")
 agents_app = typer.Typer(help="Your agents the voice AI can consult (agents.yaml).", no_args_is_help=False)
 app.add_typer(agents_app, name="agents")
+voice_app = typer.Typer(help="Voice AI tools.", no_args_is_help=True)
+app.add_typer(voice_app, name="voice")
 
 JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")]
 AiOpt = Annotated[bool, typer.Option("--ai", help="A voice AI talks on the call (default Gemini Live; see --provider).")]
 ProviderOpt = Annotated[
     Optional[str],
-    typer.Option("--provider", help="--ai: voice provider: gemini, openai, grok or phonic (default AGENTRING_VOICE_PROVIDER, "
-                 "else gemini). Each needs its key: GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY, PHONIC_API_KEY."),
+    typer.Option("--provider", help="--ai: voice provider: gemini, openai, grok, phonic or local (default "
+                 "AGENTRING_VOICE_PROVIDER, else gemini). Each needs its key: GEMINI_API_KEY, OPENAI_API_KEY, "
+                 "XAI_API_KEY, PHONIC_API_KEY; local needs a server at AGENTRING_VOICE_URL (docs/voice.md)."),
 ]
 InstructionsOpt = Annotated[
     Optional[str], typer.Option("--instructions", help="--ai: system prompt, or @file to read it from a file.")
@@ -610,6 +613,81 @@ def agents_ask(
         typer.echo(asyncio.run(agent.ask(task)))
     except (OSError, RuntimeError, TimeoutError) as e:
         raise _fail(str(e)) from None
+
+
+@voice_app.command("bench")
+def voice_bench(
+    provider: Annotated[Optional[str], typer.Option("--provider", help="gemini, openai, grok, phonic or local "
+                                                    "(default AGENTRING_VOICE_PROVIDER, else gemini).")] = None,
+    model: Annotated[Optional[str], typer.Option("--model", help="The provider's model (default AGENTRING_VOICE_MODEL, "
+                                                 "else the provider's default).")] = None,
+    voice: Annotated[Optional[str], typer.Option("--voice", help="The provider's voice.")] = None,
+    runs: Annotated[int, typer.Option("--runs", min=1, max=20, help="Sessions per prompt.")] = 3,
+    lang: Annotated[str, typer.Option("--lang", help="Language of the spoken prompts: en or es.")] = "en",
+    prompts: Annotated[Optional[str], typer.Option("--prompts", help="Directory with your own recordings "
+                                                   "(chat.wav, time.wav, chain.wav, consult.wav; 16-bit PCM) "
+                                                   "instead of the system's text-to-speech.")] = None,
+    out: Annotated[Optional[str], typer.Option("--out", help="Keep each session's audio (WAV) and results.jsonl here.")] = None,
+    instructions: Annotated[Optional[str], typer.Option("--instructions", help="System prompt instead of the one "
+                                                        "`call --ai` uses, or @file.")] = None,
+    json_out: JsonOpt = False,
+) -> None:
+    """Time a voice provider on the agentring phone-call test: 4 spoken prompts, the same demo tools.
+
+    Reports, per prompt, the median time from the end of speech to the first word, how often the right tools were called, and how often it spoke before a tool answered. Uses the provider's real API (and its minutes): about 12 short sessions with --runs 3.
+    """
+    from pathlib import Path
+
+    try:
+        from .voice import bench
+    except ImportError:
+        raise _fail("voice support is not installed: install agentring with the [voice] extra") from None
+    from .voice.providers import VoiceConfigError, resolve_voice
+
+    if lang not in bench.PROMPTS:
+        raise _fail(f"--lang: one of {', '.join(bench.PROMPTS)}")
+    try:
+        choice = resolve_voice(provider, model, voice)
+    except VoiceConfigError as e:
+        raise _fail(str(e)) from None
+    out_dir = Path(out).expanduser() if out else None
+    if out_dir:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        files = bench.prompt_files(Path(prompts).expanduser()) if prompts else bench.speak_prompts(lang, bench.temp_dir())
+    except (OSError, RuntimeError, ValueError) as e:
+        raise _fail(str(e)) from None
+    where = f" at {choice.url}" if choice.url else ""
+    if not json_out:
+        typer.echo(f"{choice.provider.label} ({choice.model}){where}: {len(bench.SCENARIOS)} prompts x {runs}")
+
+    def progress(s: Any) -> None:
+        if json_out:
+            return
+        took = f"{s.first_voice_s:.2f} s" if s.first_voice_s is not None else "no voice"
+        tools = ", ".join(s.tools) or "no tools"
+        typer.echo(f"  {s.scenario:<8} #{s.run + 1}  {took:<9} {tools}{'  ' + s.error if s.error else ''}")
+
+    from .voice.quick import read_instructions
+
+    try:
+        text = read_instructions(instructions) if instructions else None
+    except OSError as e:
+        raise _fail(f"cannot read the instructions: {e}") from None
+    sessions = asyncio.run(bench.run_bench(choice.factory(), files, runs=runs, out=out_dir, instructions=text,
+                                           on_session=progress))
+    summ = bench.summary(sessions)
+    if json_out:
+        typer.echo(json.dumps({"provider": choice.provider.name, "model": choice.model, "url": choice.url,
+                               "runs": runs, "lang": lang, "summary": summ}, ensure_ascii=False, indent=2))
+        return
+    typer.echo("")
+    typer.echo(f"{'prompt':<9}{'first voice':>12}{'right tools':>13}{'spoke before tool':>19}")
+    for name, r in summ.items():
+        fv = f"{r['first_voice_s']:.2f} s" if r["first_voice_s"] is not None else "-"
+        typer.echo(f"{name:<9}{fv:>12}{r['tools_ok']:>13}{(r['spoke_before_tool'] or '-'):>19}")
+    if out_dir:
+        typer.echo(f"\nAudio and results.jsonl in {out_dir}")
 
 
 @app.command()

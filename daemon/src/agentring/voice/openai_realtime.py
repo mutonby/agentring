@@ -1,4 +1,5 @@
-"""OpenAI Realtime over WebSocket as a RealtimeBackend; xAI Grok Voice speaks the same protocol.
+"""OpenAI Realtime over WebSocket as a RealtimeBackend; xAI Grok Voice speaks the same protocol,
+and so do servers you run yourself (LocalRealtime, e.g. Hugging Face speech-to-speech).
 
 Function calls are collected until `response.done` and handed over together, so the
 tool results go back with a single `response.create` (one at a time would make the
@@ -7,6 +8,7 @@ second one fail with "conversation already has an active response").
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -29,6 +31,8 @@ DEFAULT_TRANSCRIPTION = "gpt-4o-mini-transcribe"
 XAI_WS = "wss://api.x.ai/v1/realtime"
 GROK_MODEL = "grok-voice-latest"
 GROK_TRANSCRIPTION = "grok-transcribe"
+
+LOCAL_WS = "ws://127.0.0.1:8765/v1/realtime"  # Hugging Face speech-to-speech's default
 
 
 def function_tools(tools: list[Tool]) -> list[dict[str, Any]]:
@@ -174,3 +178,33 @@ class GrokVoice(OpenAIRealtime):
         if tools:
             session["tools"] = function_tools(tools)
         return session
+
+
+class LocalRealtime(OpenAIRealtime):
+    """An OpenAI-Realtime-compatible server you run yourself, such as Hugging Face speech-to-speech
+    (https://github.com/huggingface/speech-to-speech) with a small model on llama.cpp behind it.
+
+    No key unless the server asks for one, no voice or transcription model to pick (the server
+    has its own), and no session limit. Which language model answers is the server's choice.
+    """
+
+    max_session_s = None
+    busy_wait_s = 15.0  # a server with one slot frees it a moment after the previous session closes
+
+    def __init__(self, api_key: str | None = None, *, model: str = "local", voice: str | None = None,
+                 url: str = LOCAL_WS, transcription_model: str | None = None, **kw: Any):
+        super().__init__(api_key or "local", model=model, voice=voice, url=url,
+                         transcription_model=transcription_model, **kw)
+
+    async def connect(self, instructions: str, tools: list[Tool]) -> None:
+        deadline = asyncio.get_running_loop().time() + self.busy_wait_s
+        while True:
+            try:
+                return await super().connect(instructions, tools)
+            except (RuntimeError, websockets.ConnectionClosed) as e:
+                busy = "session_limit_reached" in str(e) or "session slots" in str(e)
+                if not busy or asyncio.get_running_loop().time() > deadline:
+                    raise
+                log.info("local voice server busy, retrying")
+                await self.close()
+                await asyncio.sleep(0.5)

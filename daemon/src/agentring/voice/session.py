@@ -61,6 +61,10 @@ class Prompts:
     left: str = "({name} hung up; still on the call: {others}.)"
     end_call: str = "End the call once the user says goodbye or asks you to hang up (say goodbye first)."
     tool_timeout: str = "Still running after {seconds} s; it carries on in the background. Tell the user."
+    # Added to the instructions when the call has tools: some models go quiet until a tool answers,
+    # which on a phone sounds like the line dropped. "" leaves the instructions as they are.
+    before_tools: str = ("Before you call a tool, say a few words first so the line is never silent (for example "
+                         "\"let me check\"), then call it. Never answer from memory what a tool should tell you.")
     someone: str = "the user"
     joiner: str = " and "
 
@@ -384,7 +388,10 @@ class CallSession:
 
     async def _instructions(self) -> str:
         ins = self.agent.instructions
-        return await _maybe_await(ins(self.info)) if callable(ins) else ins
+        text = await _maybe_await(ins(self.info)) if callable(ins) else ins
+        if self.tools and self.prompts.before_tools:
+            text = f"{text.rstrip()}\n\n{self.prompts.before_tools}"
+        return text
 
     async def _connect_model(self) -> None:
         await self.backend.connect(await self._instructions(), self.tool_specs())

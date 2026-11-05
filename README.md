@@ -79,9 +79,11 @@ the conversation and hands real work to your agents. Pick the one you like:
 | [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) | `openai` | `OPENAI_API_KEY` |
 | [Grok Voice](https://docs.x.ai/docs/guides/voice/agent) (xAI) | `grok` | `XAI_API_KEY` |
 | [Phonic](https://docs.phonic.ai) | `phonic` | `PHONIC_API_KEY` |
+| Your own server, e.g. [HF speech-to-speech](https://github.com/huggingface/speech-to-speech) + a small model on llama.cpp (experimental) | `local` | none |
 
 Set `AGENTRING_VOICE_PROVIDER` in `~/.agentring/.env` to use one for every call, from the
-CLI and from MCP. How they compare (latency, tool use) and how to add another one:
+CLI and from MCP. How they compare (latency, tool use), how to measure them yourself
+(`agentring voice bench`), the local setup and how to add another one:
 [docs/voice.md](docs/voice.md#providers).
 
 More: [architecture](docs/architecture.md) · [protocol](docs/protocol.md) ·
@@ -139,8 +141,9 @@ agents you'd trust someone holding your phone with. Details and the threat model
 
 - Android only (no iOS yet).
 - One user per relay: no accounts.
-- The voice AI needs a cloud realtime model (Gemini, OpenAI, Grok or Phonic); others,
-  local ones included, plug in through [`RealtimeBackend`](docs/voice.md#backends).
+- The voice AI works best with a cloud realtime model (Gemini, OpenAI, Grok or Phonic). A local
+  one runs on your own machine (`--provider local`), but it's experimental and slower; others
+  plug in through [`RealtimeBackend`](docs/voice.md#backends).
 
 ## Development
 

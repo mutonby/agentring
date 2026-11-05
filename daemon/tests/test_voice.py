@@ -325,3 +325,18 @@ def test_consult_agent_through_the_session():
     out, (note, respond) = asyncio.run(run())
     assert "working on it" in out
     assert "ok disk" in note and respond is True
+
+
+def test_instructions_ask_to_talk_before_tools():
+    from agentring.voice import Prompts
+
+    async def run():
+        text = await _session()._instructions()
+        assert text.startswith("x\n\n") and "let me check" in text and "Never answer from memory" in text
+        agent = VoiceAgent(lambda: _NullBackend(), "x", [])  # no tools: nothing to add
+        assert await CallSession(agent, CallInfo("c", "t"))._instructions() == "x"
+        agent = VoiceAgent(lambda: _NullBackend(), "x", [Tool("add", "Add.", lambda a, b: a + b)],
+                           prompts=Prompts(before_tools=""))
+        assert await CallSession(agent, CallInfo("c", "t"))._instructions() == "x"
+
+    asyncio.run(run())
