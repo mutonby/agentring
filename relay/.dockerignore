@@ -1,4 +1,4 @@
-# Only package*.json, tsconfig.json and src/ are needed to build.
+# Only package*.json, tsconfig.json, src/, scripts/ and web/ are needed to build.
 node_modules
 dist
 data

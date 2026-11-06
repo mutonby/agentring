@@ -9,9 +9,9 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/vendor-web.mjs",
     "start": "node --disable-warning=ExperimentalWarning dist/main.js",
-    "dev": "tsx watch src/main.ts",
+    "dev": "node scripts/vendor-web.mjs && tsx watch src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "gen:types": "openapi-typescript ../protocol/relay.openapi.yaml -o src/generated/api.ts"
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/ws": "^8.18.2",
+    "livekit-client": "2.22.4",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
