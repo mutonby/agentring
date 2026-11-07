@@ -27,6 +27,13 @@ class MessageRepository(context: Context) {
     /** Highest relay event `seq` applied from the WebSocket stream. */
     val lastSeq: Long get() = prefs.getLong(KEY_SEQ, 0L)
 
+    /**
+     * Moves on with every [clear]. Work for a pairing reads it before starting and passes
+     * it back with what it writes, so a late answer can't reach the next pairing's store.
+     */
+    @Volatile var generation = 0L
+        private set
+
     private fun loadCache(): List<Message> = try {
         if (cache.exists()) ProtocolJson.decodeFromString(serializer, cache.readText()) else emptyList()
     } catch (e: Exception) {
@@ -44,15 +51,16 @@ class MessageRepository(context: Context) {
         }
     }
 
-    private fun mutate(block: (List<Message>) -> List<Message>) {
+    private fun mutate(generation: Long = this.generation, block: (List<Message>) -> List<Message>) {
         synchronized(this) {
+            if (generation != this.generation) return
             _messages.update { block(it) }
             persist(_messages.value)
         }
     }
 
     /** Inserts or updates by msg_id. A truncated push never overwrites a full text we already have. */
-    fun upsert(m: Message, truncated: Boolean = false) = mutate { list ->
+    fun upsert(m: Message, truncated: Boolean = false, generation: Long = this.generation) = mutate(generation) { list ->
         val existing = list.firstOrNull { it.msgId == m.msgId }
         val merged = when {
             existing == null -> m
@@ -63,24 +71,28 @@ class MessageRepository(context: Context) {
     }
 
     /** Applies a relay event. `advanceSeq` is false for push-delivered events (the stream may still be behind). */
-    fun apply(event: Event, advanceSeq: Boolean) {
+    fun apply(event: Event, advanceSeq: Boolean, generation: Long = this.generation) {
         when (event) {
-            is Event.MsgNew -> upsert(event.toMessage(), truncated = event.truncated == true)
-            is Event.MsgRead -> mutate { list ->
+            is Event.MsgNew -> upsert(event.toMessage(), truncated = event.truncated == true, generation = generation)
+            is Event.MsgRead -> mutate(generation) { list ->
                 list.map { if (it.msgId == event.msgId && it.readAt == null) it.copy(readAt = event.ts) else it }
             }
             else -> Unit
         }
         val seq = event.seq
-        if (advanceSeq && seq != null && seq > lastSeq) prefs.edit().putLong(KEY_SEQ, seq).apply()
+        synchronized(this) {
+            if (generation == this.generation && advanceSeq && seq != null && seq > lastSeq) {
+                prefs.edit().putLong(KEY_SEQ, seq).apply()
+            }
+        }
     }
 
     /** Pulls messages we don't have yet. Blocking; call from a background thread. */
-    fun refresh(api: RelayApi) {
+    fun refresh(api: RelayApi, generation: Long = this.generation) {
         var after = _messages.value.lastOrNull()?.msgId
-        while (true) {
+        while (generation == this.generation) {
             val page = api.listMessages(after = after)
-            page.messages.forEach { upsert(it) }
+            page.messages.forEach { upsert(it, generation = generation) }
             if (!page.hasMore || page.messages.isEmpty()) return
             after = page.messages.last().msgId
         }
@@ -104,6 +116,7 @@ class MessageRepository(context: Context) {
     fun unreadFromAgent(): List<Message> = _messages.value.filter { it.fromAgent && it.readAt == null }
 
     fun clear() = synchronized(this) {
+        generation++
         _messages.value = emptyList()
         cache.delete()
         prefs.edit().remove(KEY_SEQ).apply()

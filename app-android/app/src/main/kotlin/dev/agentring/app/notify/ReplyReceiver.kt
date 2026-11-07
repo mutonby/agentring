@@ -19,10 +19,11 @@ class ReplyReceiver : BroadcastReceiver() {
         val pending = goAsync()
         Graph.appScope.launch(Dispatchers.IO) {
             try {
+                val generation = Graph.messages.generation
                 val api = Graph.api() ?: error("not paired")
                 val agentName = Graph.pairing.current?.agentName ?: ""
                 val shown = Graph.messages.unreadFromAgent()
-                Graph.messages.upsert(api.postMessage(text, clientMsgId = UUID.randomUUID().toString()))
+                Graph.messages.upsert(api.postMessage(text, clientMsgId = UUID.randomUUID().toString()), generation = generation)
                 // Replying implies the user read what the agent said.
                 Graph.messages.markAgentMessagesRead(api)
                 Notifications.showMessages(appContext, agentName, shown, sentReply = text)

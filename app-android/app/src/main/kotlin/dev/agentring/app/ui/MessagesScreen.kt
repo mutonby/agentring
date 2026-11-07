@@ -148,11 +148,12 @@ fun MessagesScreen(pairing: Pairing) {
                         sending = true
                         sendError = null
                         try {
+                            val generation = Graph.messages.generation
                             val api = Graph.api() ?: error("not paired")
                             val m = withContext(Dispatchers.IO) {
                                 api.postMessage(text, clientMsgId = UUID.randomUUID().toString())
                             }
-                            Graph.messages.upsert(m)
+                            Graph.messages.upsert(m, generation = generation)
                             input = ""
                         } catch (e: Exception) {
                             sendError = e.message ?: e.javaClass.simpleName
