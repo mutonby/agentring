@@ -18,6 +18,7 @@ object PushHandler {
 
     /** Runs on a background thread (network allowed). */
     fun handle(context: Context, data: Map<String, String>): Outcome {
+        val generation = Graph.messages.generation
         val p = Graph.pairing.current ?: return Outcome.Ignored("not paired")
         val event = when (val r = PushVerifier.verify(data, p.relayId, p.pushSecret)) {
             is PushVerifier.Result.Rejected -> {
@@ -36,7 +37,7 @@ object PushHandler {
                         truncated = false
                     }
                 }
-                Graph.messages.upsert(msg, truncated = truncated)
+                Graph.messages.upsert(msg, truncated = truncated, generation = generation)
                 if (msg.fromAgent && !AppVisibility.messagesVisible) {
                     Notifications.showMessages(context, p.agentName)
                     Outcome.Notified(msg.msgId)
@@ -53,7 +54,7 @@ object PushHandler {
                 Outcome.Applied
             }
             else -> {
-                Graph.messages.apply(event, advanceSeq = false)
+                Graph.messages.apply(event, advanceSeq = false, generation = generation)
                 Outcome.Applied
             }
         }

@@ -3,6 +3,9 @@ package dev.agentring.core
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
@@ -12,9 +15,72 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class CoreTest {
     private val protocolDir = File(System.getProperty("agentring.protocolDir") ?: "../../protocol")
+
+    /** Opens a socket to a server that says hello as [helloId], then sends one message. */
+    private fun socketAgainst(helloId: String, expected: String?): Pair<List<Event>, List<String>> {
+        val events = CopyOnWriteArrayList<Event>()
+        val wrong = CopyOnWriteArrayList<String>()
+        val finished = CountDownLatch(1)
+        val hello = """{"type":"ws.hello","id":"evt_h","ts":1,"relay_id":"$helloId","last_seq":0,"server_ts":1}"""
+        val message = """{"type":"msg.new","id":"evt_1","ts":1,"seq":1,"msg_id":"msg_1","from":"agent","text":"hi"}"""
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        webSocket.send(hello)
+                        webSocket.send(message)
+                    }
+
+                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                        webSocket.close(1000, null)
+                    }
+                }),
+            )
+            val socket = RelaySocket(
+                RelayApi(server.url("/").toString().trimEnd('/'), "jwt"),
+                { 0L },
+                object : RelaySocket.Listener {
+                    override fun onEvent(event: Event) {
+                        events += event
+                        if (event is Event.MsgNew) finished.countDown()
+                    }
+
+                    override fun onState(state: RelaySocket.State) = Unit
+                    override fun onUnauthorized() = fail("not unauthorized")
+                    override fun onWrongRelay(relayId: String) {
+                        wrong += relayId
+                        finished.countDown()
+                    }
+                },
+                expectedRelayId = expected,
+            )
+            socket.start()
+            assertTrue("socket got nowhere", finished.await(10, TimeUnit.SECONDS))
+            Thread.sleep(200) // A message after the bad hello would land now.
+            socket.stop()
+        }
+        return events to wrong
+    }
+
+    @Test
+    fun `a server naming another relay is dropped and delivers nothing`() {
+        val (events, wrong) = socketAgainst(helloId = "rly_other", expected = "rly_paired")
+        assertEquals(listOf("rly_other"), wrong)
+        assertTrue(events.toString(), events.isEmpty())
+    }
+
+    @Test
+    fun `the paired relay stays connected`() {
+        val (events, wrong) = socketAgainst(helloId = "rly_paired", expected = "rly_paired")
+        assertTrue(wrong.isEmpty())
+        assertEquals(listOf("ws.hello", "msg.new"), events.map { it.type })
+    }
 
     @Test
     fun `every event fixture parses to a typed event`() {
