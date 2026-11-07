@@ -13,6 +13,8 @@ from pathlib import Path
 import yaml
 from dotenv import dotenv_values
 
+from .relay_client import InsecureRelayError, check_relay_url
+
 
 class ConfigError(Exception):
     pass
@@ -51,6 +53,10 @@ def load_settings() -> Settings:
     api_key = os.environ.get("AGENTRING_API_KEY") or secrets.get("AGENTRING_API_KEY")
     if not relay_url or not api_key:
         raise ConfigError("Not configured. Run: agentring init --relay https://<your relay> --api-key ak_...")
+    try:
+        check_relay_url(str(relay_url))
+    except InsecureRelayError as e:
+        raise ConfigError(str(e)) from None
     return Settings(relay_url=str(relay_url).rstrip("/"), api_key=str(api_key), home=home)
 
 

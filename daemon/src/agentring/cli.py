@@ -17,7 +17,7 @@ import typer
 
 from . import __version__
 from .config import ConfigError, Settings, home_dir, load_settings, write_settings
-from .relay_client import RelayClient, RelayError
+from .relay_client import InsecureRelayError, RelayClient, RelayError
 from .store import Store
 from .sync import FatalSyncError, catch_up, run_ws
 
@@ -172,6 +172,8 @@ def _root(
         stream=sys.stderr,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # At DEBUG websockets logs every handshake header, API keys included.
+    logging.getLogger("websockets").setLevel(logging.INFO)
 
 
 @app.command()
@@ -190,13 +192,15 @@ def init(
         raise _fail("--relay must be an http(s) URL")
     if not api_key.startswith("ak_"):
         raise _fail("--api-key must start with ak_")
-    with RelayClient(relay, api_key) as c:
-        try:
+    try:
+        with RelayClient(relay, api_key) as c:
             st = c.status()
-        except RelayError as e:
-            raise _fail(str(e)) from None
+    except (RelayError, InsecureRelayError) as e:
+        raise _fail(str(e)) from None
+    if not isinstance(st, dict) or not st.get("relay_id"):
+        raise _fail(f"{relay} did not answer like an agentring relay; nothing was saved")
     home = write_settings(relay, api_key)
-    typer.echo(f"Connected to relay {st['relay_id']} (agent name: {st['agent_name']}). Config saved in {home}")
+    typer.echo(f"Connected to relay {st['relay_id']} (agent name: {st.get('agent_name')}). Config saved in {home}")
 
 
 @app.command()

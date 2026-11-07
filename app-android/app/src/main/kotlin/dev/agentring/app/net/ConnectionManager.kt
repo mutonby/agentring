@@ -40,12 +40,16 @@ class ConnectionManager : DefaultLifecycleObserver {
     @Synchronized
     fun connect() {
         if (!foreground || socket != null) return
+        // Read before the pairing: an unpair in between then makes this work stale, never current.
+        val generation = Graph.messages.generation
+        val stale = { generation != Graph.messages.generation }
         val p = Graph.pairing.current ?: return
         if (Graph.pairing.revoked.value) return
         val api = RelayApi(p.relayUrl, p.deviceJwt, userAgent = Graph.userAgent)
         var created: RelaySocket? = null
         val s = RelaySocket(api, { Graph.messages.lastSeq }, object : RelaySocket.Listener {
             override fun onEvent(event: Event) {
+                if (stale()) return
                 if (event is Event.AgentPresence) _agentOnline.value = event.online
                 when (event) {
                     // The socket may replay an old invite: check it's still ringing first.
@@ -53,7 +57,7 @@ class ConnectionManager : DefaultLifecycleObserver {
                     is Event.CallAnswer, is Event.CallEnd, is Event.CallMissed -> Graph.calls.onCallEvent(event)
                     else -> Unit
                 }
-                Graph.messages.apply(event, advanceSeq = true)
+                Graph.messages.apply(event, advanceSeq = true, generation = generation)
             }
 
             override fun onState(state: RelaySocket.State) {
@@ -63,20 +67,25 @@ class ConnectionManager : DefaultLifecycleObserver {
 
             override fun onUnauthorized() {
                 Log.w(TAG, "relay rejected our credentials")
-                Graph.pairing.markRevoked()
+                if (!stale()) Graph.pairing.markRevoked()
             }
-        })
+
+            override fun onWrongRelay(relayId: String) {
+                Log.w(TAG, "disconnected: the server says it is relay $relayId, we are paired with ${p.relayId}")
+            }
+        }, expectedRelayId = p.relayId)
         created = s
         socket = s
         s.start()
 
         Graph.appScope.launch(Dispatchers.IO) {
             try {
-                Graph.messages.refresh(api)
+                Graph.messages.refresh(api, generation)
                 // A group call may be going on without this phone (missed ring, push lost): offer to join.
-                Graph.calls.onActiveCall(api.status().activeCall)
+                val activeCall = api.status().activeCall
+                if (!stale()) Graph.calls.onActiveCall(activeCall)
             } catch (e: RelayException) {
-                if (e.isUnauthorized) Graph.pairing.markRevoked()
+                if (e.isUnauthorized && !stale()) Graph.pairing.markRevoked()
             } catch (e: Exception) {
                 Log.w(TAG, "refresh failed", e)
             }

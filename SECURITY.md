@@ -24,7 +24,9 @@ the public debug key (see below).
 ## Threat model
 
 agentring is self-hosted: you run the relay, LiveKit and the daemon. One user,
-one agent, one or more paired Android phones; there are no accounts.
+one agent, one or more paired Android phones; there are no accounts. The hosted
+version runs the same relay in hub mode, many isolated tenants in one process
+(docs/cloud.md): there, one tenant must not be able to affect another.
 
 ### What the relay stores and can see
 
@@ -52,10 +54,16 @@ agent. The relay never handles call audio: media goes through LiveKit.
   setting a new `AGENTRING_API_KEY` on the relay.
 - **Device JWT**: HS256, issued at pairing, long-lived. Every request re-checks
   the device row, so `agentring devices revoke <device_id>` takes effect
-  immediately: REST calls return 401 and open WebSockets are closed with code
-  4401. On the phone the JWT and `push_secret` are AES-GCM encrypted with a
+  immediately: REST calls return 401, open WebSockets are closed with code
+  4401, and if the phone is on the open call that call ends and its room closes.
+  A join token minted just before stays valid for up to 120 s but finds no room,
+  because deployments run LiveKit with `room.auto_create: false`. On the phone the JWT and `push_secret` are AES-GCM encrypted with a
   non-exportable Android Keystore key.
+- **Agent tokens (`at_…`, hub mode)**: short-lived agent credentials, at most one
+  hour. They can't create pairing tokens or revoke devices, and a socket opened
+  with one closes when it expires.
 - **Pairing tokens**: single-use, expire after at most 10 minutes, stored hashed.
+  Rotating the API key deletes the unused ones.
   The QR code carries the token in clear: treat it like a password while it is
   valid.
 
@@ -94,6 +102,8 @@ keep it private.
   LiveKit server you run can access call audio.
 - The LiveKit API secret can mint tokens for any room; the relay requires it to
   be at least 32 characters.
+- LiveKit must run with `room.auto_create: false` (`deploy/livekit.yaml`): the relay
+  creates each room, so a token that outlives its call can't bring the room back.
 
 ### Voice AI provider
 

@@ -40,6 +40,7 @@ class CallInfo:
     call_id: str
     reason: str = ""
     direction: str = "agent_to_user"  # or user_to_agent (the user called the agent)
+    device_ids: list[str] | None = None  # a targeted call: private to these phones (messages reach every phone)
 
     @property
     def inbound(self) -> bool:
@@ -170,7 +171,7 @@ class CallSession:
         self.answered_at: float | None = None
         self._hangup_at = 0.0
         self._empty: asyncio.TimerHandle | None = None
-        self._notes: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._notes: asyncio.Queue[tuple[str, bool, bool]] = asyncio.Queue()
         self._tasks: list[asyncio.Task] = []
         self._streams: list[rtc.AudioStream] = []
         self._frame = self.backend.output_rate // 100 * 2  # 10 ms of PCM16
@@ -194,9 +195,10 @@ class CallSession:
     def names(self) -> str:
         return self.prompts.joiner.join(self.participants) or self.prompts.someone
 
-    def notify(self, text: str, *, respond: bool = False) -> None:
-        """Tell the model something once it finishes its current sentence."""
-        self._notes.put_nowait((text, respond))
+    def notify(self, text: str, *, respond: bool = False, trusted: bool = True) -> None:
+        """Tell the model something once it finishes its current sentence. `trusted=False`
+        when the text comes from outside the session (another program's output)."""
+        self._notes.put_nowait((text, respond, trusted))
 
     def hang_up(self) -> None:
         """End the call after the model finishes what it is saying."""
@@ -293,11 +295,13 @@ class CallSession:
             await self.source.capture_frame(rtc.AudioFrame(frame, self.backend.output_rate, 1, self._frame // 2))
 
     async def _notes_loop(self) -> None:
+        # `trusted` is optional in a backend: one written before it existed keeps working.
+        provenance = "trusted" in inspect.signature(self.backend.send_text).parameters
         while True:
-            text, respond = await self._notes.get()
+            text, respond, trusted = await self._notes.get()
             while self.output or time.time() - self.last_agent_audio_at < 0.8:
                 await asyncio.sleep(0.2)
-            await self.backend.send_text(text, respond=respond)
+            await self.backend.send_text(text, respond=respond, **({"trusted": trusted} if provenance else {}))
 
     # ------------------------------------------------------------ model
 

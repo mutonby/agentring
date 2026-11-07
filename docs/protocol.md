@@ -22,7 +22,8 @@ URL unless `AGENTRING_INSECURE_DEV=1`.
 
 Every device request re-checks the device row, so `DELETE /v1/devices/{id}`
 revokes immediately (REST returns 401, open WebSockets are closed with code
-4401).
+4401). A phone on the open call also ends that call: its room closes, which is
+what takes back a join token LiveKit keeps refreshing.
 
 ## Identifiers and time
 
@@ -294,8 +295,8 @@ they can answer, decline or join it; the group-call rules above apply among them
 Every other phone gets no event or push for it, so it never rings or offers
 "join", even with an old app: the filtering is done by the relay. For those
 phones the call does not exist: `GET /v1/calls/{call_id}` is `404`, it is left
-out of `GET /v1/calls` and of `active_call` in `GET /v1/status`, and
-`accept` / `decline` / `join` are `403 forbidden` (`ringing` is ignored). It
+out of `GET /v1/calls` and of `active_call` in `GET /v1/status`, `end` is `404`
+too, and `accept` / `decline` / `join` are `403 forbidden` (`ringing` is ignored). It
 still blocks new calls while it rings or is active (`409 busy`, one call at a
 time). The `Call` object and the `call.invite` event carry `device_ids`.
 

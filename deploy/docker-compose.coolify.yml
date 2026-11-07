@@ -25,7 +25,8 @@ services:
       FCM_SERVICE_ACCOUNT_FILE: /secrets/firebase-service-account.json
       FCM_GOOGLE_SERVICES_FILE: /secrets/google-services.json
       LIVEKIT_URL: wss://${AGENTRING_DOMAIN}
-      LIVEKIT_API_URL: http://livekit:7880
+      # An alias on the private network: the shared "coolify" network has other tenants' services on it.
+      LIVEKIT_API_URL: http://agentring-livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET_FILE: /secrets/livekit-api-secret
     volumes:
@@ -73,7 +74,10 @@ services:
     ports:
       - "7881:7881/tcp"
       - "50000-50100:50000-50100/udp"
-    networks: [agentring, coolify]
+    networks:
+      agentring:
+        aliases: [agentring-livekit]
+      coolify:
     labels:
       - traefik.enable=true
       - traefik.docker.network=coolify

@@ -17,6 +17,8 @@ export interface Config {
   /** Explicit API key from env; otherwise one is generated and persisted. */
   apiKey?: string;
   ringTimeoutS: number;
+  /** Reverse proxies in front of the relay; the client address is read that many hops from the right of X-Forwarded-For. */
+  trustedProxies?: number;
   insecureDev: boolean;
   livekit?: LiveKitConfig;
   fcm?: {
@@ -69,6 +71,17 @@ export function parseGoogleServices(json: unknown, pkg = ANDROID_PACKAGE): FcmCl
     if (!v) throw new Error(`google-services.json is missing ${k}`);
   }
   return out;
+}
+
+/** Fastify's `trustProxy`: trust exactly that many hops, nearest first. */
+export function trustedHops(cfg: Pick<Config, "trustedProxies">): (address: string, hop: number) => boolean {
+  const hops = cfg.trustedProxies ?? 1;
+  return (_address, hop) => hop < hops;
+}
+
+function trustedProxies(value: string): number {
+  if (!/^\d+$/.test(value)) throw new Error(`AGENTRING_TRUSTED_PROXIES must be a number of proxies (got ${value})`);
+  return Number(value);
 }
 
 export function loadConfig(): Config {
@@ -124,6 +137,7 @@ export function loadConfig(): Config {
     agentName: env("AGENTRING_AGENT_NAME", "Agent")!,
     apiKey: env("AGENTRING_API_KEY"),
     ringTimeoutS: Number(env("AGENTRING_RING_TIMEOUT_S", "30")),
+    trustedProxies: trustedProxies(env("AGENTRING_TRUSTED_PROXIES", "1")!),
     insecureDev,
     fcm,
     livekit,

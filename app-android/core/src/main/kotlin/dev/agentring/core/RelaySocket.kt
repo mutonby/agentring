@@ -13,13 +13,15 @@ import kotlin.random.Random
 
 /**
  * Resumable event stream: reconnects with exponential backoff and resumes
- * from the last `seq` the caller has processed.
+ * from the last `seq` the caller has processed. With [expectedRelayId], a server whose
+ * `ws.hello` names another relay is dropped and nothing it sends is delivered.
  */
 class RelaySocket(
     private val api: RelayApi,
     private val lastSeq: () -> Long,
     private val listener: Listener,
     private val http: OkHttpClient = RelayApi.defaultClient,
+    private val expectedRelayId: String? = null,
 ) {
     enum class State { CONNECTING, CONNECTED, DISCONNECTED }
 
@@ -28,6 +30,8 @@ class RelaySocket(
         fun onState(state: State)
         /** Credentials rejected (revoked device). The socket stops reconnecting. */
         fun onUnauthorized()
+        /** The server is not the relay we paired with. The socket stops reconnecting. */
+        fun onWrongRelay(relayId: String) = Unit
     }
 
     private val scheduler = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "relay-socket").apply { isDaemon = true } }
@@ -35,6 +39,7 @@ class RelaySocket(
     private var retry: ScheduledFuture<*>? = null
     private var attempts = 0
     @Volatile private var running = false
+    @Volatile private var wrongRelay = false
 
     /** Runs on the socket's thread; silently dropped once the socket is stopped. */
     private fun post(block: () -> Unit) {
@@ -77,6 +82,12 @@ class RelaySocket(
                 } catch (e: Exception) {
                     return
                 }
+                if (wrongRelay) return
+                if (event is Event.WsHello && expectedRelayId != null && event.relayId != expectedRelayId) {
+                    wrongRelay = true
+                    post { onWrongRelay(webSocket, event.relayId) }
+                    return
+                }
                 listener.onEvent(event)
             }
 
@@ -89,6 +100,15 @@ class RelaySocket(
                 post { onDown(webSocket, unauthorized = response?.code == 401) }
         })
         ws = socket
+    }
+
+    private fun onWrongRelay(socket: WebSocket, relayId: String) {
+        if (ws !== socket) return
+        running = false
+        ws = null
+        socket.close(1000, "wrong relay")
+        listener.onState(State.DISCONNECTED)
+        listener.onWrongRelay(relayId)
     }
 
     private fun onDown(socket: WebSocket, unauthorized: Boolean) {

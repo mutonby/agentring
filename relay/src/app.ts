@@ -4,7 +4,7 @@ import { join } from "node:path";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { Auth, sha256 } from "./auth.js";
-import { type Config, dbPath } from "./config.js";
+import { type Config, dbPath, trustedHops } from "./config.js";
 import type { Ctx } from "./context.js";
 import { type Db, metaOrInit, openDatabase } from "./db/database.js";
 import { ApiError } from "./errors.js";
@@ -39,7 +39,7 @@ export interface TenantOptions {
   apiKeyHash: () => Buffer;
   limits: () => Limits;
   /** Whether a short-lived agent token (by its SHA-256) is currently valid for this tenant. */
-  agentToken?: (hash: Buffer) => boolean;
+  agentToken?: (hash: Buffer) => number | undefined;
   /** LiveKit room name prefix, "{tenant_id}.". */
   roomPrefix: string;
 }
@@ -95,7 +95,8 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
 
   const app = Fastify({
     ...(opts.loggerInstance ? { loggerInstance: opts.loggerInstance } : { logger: opts.logger ?? true }),
-    trustProxy: true,
+    // A hop count, not `true`: the left of X-Forwarded-For is whatever the client sent.
+    trustProxy: trustedHops(cfg),
     bodyLimit: 64 * 1024,
   });
   await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
@@ -108,6 +109,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   const events = new EventLog(db);
   const ctx: Ctx = {
     cfg,
+    log: app.log,
     db,
     auth: new Auth(db, apiKeyHash, jwtSecret, relayId, opts.tenant?.agentToken),
     events,

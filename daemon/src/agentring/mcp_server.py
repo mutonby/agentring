@@ -63,7 +63,8 @@ TOOLS: list[dict[str, Any]] = [
         "description": ("Call the user's phone; it rings like a real call. When they answer, a voice AI tells them "
                         "why you are calling, talks with them, and hangs up when done. Returns the transcript. "
                         "Blocks until the call ends (or nobody answers, ~30 s of ringing; then the reason and context "
-                        "are sent as a message, `fallback_msg_id`: read replies with get_replies)."),
+                        "are sent as a message, `fallback_msg_id`: read replies with get_replies; not when this "
+                        "server rings only some phones: then nothing is sent and `fallback_msg_id` is null)."),
         "inputSchema": {"type": "object", "properties": {
             "reason": {"type": "string", "description": "Why you are calling, one sentence; shown on the phone."},
             "context": {"type": "string", "description": ("What the voice AI should know, tell or ask the user "
@@ -125,11 +126,13 @@ class AgentringTools:
     `store` mirrors the relay's messages and remembers which replies get_replies already
     returned. `agents_file` (agents.yaml) gives the voice AI the user's agents and MCP
     servers on calls; None = none (the HTTP server never runs local commands for its users).
-    `call_slots` caps voice calls across instances."""
+    `call_slots` caps voice calls across instances. `before_tool` gates the voice AI's tools on
+    calls (see `VoiceAgent`); the default is `after_user_speech`, because `context` comes from the
+    calling agent, which may be passing on text it read elsewhere: nothing runs on that text alone."""
 
     def __init__(self, client: RelayClient, store: Store, *, relay_url: str | None = None, poll_s: float = 2.0,
                  agent_name: str | None = None, device_ids: list[str] | None = None,
-                 agents_file: Path | None = None, call_slots: CallSlots | None = None):
+                 agents_file: Path | None = None, call_slots: CallSlots | None = None, before_tool: Any = None):
         self.client = client
         self.store = store
         self.relay_url = relay_url or client.relay_url
@@ -137,6 +140,7 @@ class AgentringTools:
         self.device_ids = device_ids  # ring only these phones; None = every paired phone
         self.agents_file = agents_file
         self.call_slots = call_slots
+        self.before_tool = before_tool
         self.poll_s = poll_s
         self._call_lock = asyncio.Lock()
         self._db = threading.Lock()  # tool calls run concurrently, each in a thread
@@ -176,22 +180,25 @@ class AgentringTools:
         return view
 
     def _new_replies(self, cancelled: threading.Event | None = None) -> list[dict[str, Any]]:
-        with self._busy, self._db:
+        with self._busy:
             return self._take_replies(cancelled)
 
     def _take_replies(self, cancelled: threading.Event | None = None) -> list[dict[str, Any]]:
-        catch_up(self.client, self.store)
-        rows = self.store.replies(since=None, undelivered_only=True, limit=100)
-        if cancelled is not None and cancelled.is_set():
-            return []  # nobody will get them: leave them for the next get_replies
-        if rows:
-            self.store.mark_delivered([r["msg_id"] for r in rows], int(time.time() * 1000))
-            for r in rows:
-                if r["read_at"] is None:
-                    try:
-                        self.client.mark_read(r["msg_id"])
-                    except RelayError:
-                        pass  # the read receipt is cosmetic
+        # _db guards the store only. Held across a relay request, it would park this tenant's
+        # waiting threads in the pool the HTTP server shares with every other tenant.
+        catch_up(self.client, self.store, lock=self._db)
+        with self._db:  # claiming replies is one step: each is returned once
+            rows = self.store.replies(since=None, undelivered_only=True, limit=100)
+            if cancelled is not None and cancelled.is_set():
+                return []  # nobody will get them: leave them for the next get_replies
+            if rows:
+                self.store.mark_delivered([r["msg_id"] for r in rows], int(time.time() * 1000))
+        for r in rows:
+            if r["read_at"] is None:
+                try:
+                    self.client.mark_read(r["msg_id"])
+                except RelayError:
+                    pass  # the read receipt is cosmetic
         return [{"msg_id": r["msg_id"], "text": r["text"], "reply_to": r["reply_to"],
                  "at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["created_at"] / 1000))} for r in rows]
 
@@ -212,7 +219,7 @@ class AgentringTools:
         try:
             from .voice import CallInfo
             from .voice.agents import AgentsConfigError, load_agents
-            from .voice.quick import DEFAULT_INSTRUCTIONS, build_agent, missed_call_message
+            from .voice.quick import DEFAULT_INSTRUCTIONS, after_user_speech, build_agent, missed_call_message
         except ImportError:
             raise ToolError("voice support is not installed: install agentring with the [voice] extra") from None
         from .voice.providers import VoiceConfigError, resolve_voice
@@ -237,19 +244,21 @@ class AgentringTools:
                             "or use send_message")
         try:
             async with self._call_lock:
-                built = await build_agent(choice, instructions=instructions, agents=agents)
+                built = await build_agent(choice, instructions=instructions, agents=agents,
+                                          before_tool=self.before_tool or after_user_speech)
                 try:
                     created = await asyncio.to_thread(self.client.create_call, reason,
                                                       priority="urgent" if urgent else "normal",
                                                       agent_name=self.agent_name, device_ids=self.device_ids)
-                    r = await built.agent.run(CallInfo(created["call"]["call_id"], reason), created["join"],
-                                              relay=self.client)
+                    r = await built.agent.run(CallInfo(created["call"]["call_id"], reason, device_ids=self.device_ids),
+                                              created["join"], relay=self.client)
                 finally:
                     await built.aclose()  # agents' late answers are stopped; the user got the gist on the call
         finally:
             if self.call_slots is not None:
                 self.call_slots.release()
-        if not r.answered:
+        # A targeted call is private to its phones, and a message reaches every paired phone.
+        if not r.answered and self.device_ids is None:
             try:  # nobody answered: leave the reason (and context) where the user can reply
                 r.fallback_msg_id = await asyncio.to_thread(missed_call_message, self.client, r.call_id, reason, context)
             except RelayError as e:

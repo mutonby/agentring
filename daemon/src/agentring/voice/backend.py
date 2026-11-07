@@ -68,9 +68,12 @@ class RealtimeBackend(Protocol):
 
     async def send_audio(self, pcm: bytes) -> None: ...
 
-    async def send_text(self, text: str, *, respond: bool) -> None:
+    async def send_text(self, text: str, *, respond: bool, trusted: bool = True) -> None:
         """A text note in the conversation (who joined, why we're calling…). With
-        `respond`, the model answers it out loud; otherwise it just knows it."""
+        `respond`, the model answers it out loud; otherwise it just knows it. `trusted`
+        is False when the text is another program's output (a late `consult_agent` answer):
+        a backend must not give it the authority of the instructions. Optional: a backend
+        without this parameter gets such notes like any other."""
 
     async def send_tool_results(self, results: list[ToolResult]) -> None: ...
 

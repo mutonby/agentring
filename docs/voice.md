@@ -67,11 +67,11 @@ What you can plug in:
 
 | Option | What it does |
 |---|---|
-| `tools` | `Tool(name, description, handler, parameters)`; sync handlers run in a thread, async ones in the loop. `mcp_tools(url, allow=[…])` turns an MCP server into tools; `Consultations(load_agents(path).agents).tool()` is `consult_agent` ([agents.md](agents.md)). A tool can find its call with `current_session()` and answer later with `session.notify(text, respond=True)`. |
+| `tools` | `Tool(name, description, handler, parameters)`; sync handlers run in a thread, async ones in the loop. `mcp_tools(url, allow=[…])` turns an MCP server into tools; `Consultations(load_agents(path).agents).tool()` is `consult_agent` ([agents.md](agents.md)). A tool can find its call with `current_session()` and answer later with `session.notify(text, respond=True)`; pass `trusted=False` if that text is another program's output (see below). |
 | `instructions` | Text, or a function of `CallInfo` (e.g. to add fresh context when the call starts). |
 | `prompts` | `Prompts(...)`: the notes the session gives the model when someone answers, joins or leaves, the `end_call` description, and `before_tools`, the line added to the instructions when there are tools ("say a few words before you call a tool, never answer from memory what a tool should tell you"; `""` leaves the instructions alone). Change them to change wording or language. |
 | `name_of` | LiveKit identity (`device_<id>`) → the person's name, so the model greets them by name. |
-| `before_tool` | `(session, call) → None \| dict \| str`: run, run with other args, or skip with that answer. The session exposes `transcript`, `partial`, `participants` and `last_user_speech_at` (e.g. "only act if the user asked in the last 45 s"). |
+| `before_tool` | `(session, call) → None \| dict \| str`: run, run with other args, or skip with that answer. The session exposes `transcript`, `partial`, `participants` and `last_user_speech_at` (e.g. "only act if the user asked in the last 45 s"). `build_agent(..., before_tool=…)` takes it too. |
 | `end_call_tool`, `tool_timeout_s`, `ring_timeout_s`, `max_duration_s`, `empty_room_grace_s` | Limits. A tool slower than its timeout keeps running; the model is told so. |
 
 Behaviour: the agent joins the room while the phone rings and opens the model
@@ -82,6 +82,21 @@ the call keeps listening while a slow tool works. The call ends when the model
 calls `end_call` (after its goodbye), everyone leaves (10 s grace for a dropped
 connection), the relay says it is over, or the model's session limit is near
 (Gemini: 15 min; OpenAI: 60 min).
+
+**Text the voice AI should not obey.** Two things can reach the model from other programs:
+
+- The MCP `call` tool's `context` comes from the calling agent, which may be passing on
+  text it read somewhere. So on those calls `before_tool` defaults to `after_user_speech`
+  (`agentring.voice`): every tool is refused, with a note telling the model to ask,
+  until someone on the call has spoken, going by the transcript. Hanging up is never
+  held back. `AgentringTools(..., before_tool=…)` replaces it. `call --ai` and
+  `serve --ai` have no gate: their instructions are your own.
+- A late `consult_agent` answer is an agent's output, so it is a note with `trusted=False`.
+  `RealtimeBackend.send_text(text, *, respond, trusted=True)` gets that flag. Gemini,
+  OpenAI and Grok send every note with the `user` role and ignore it. Phonic only takes
+  text as a system message, so it sends such a note fenced as data, with a random tag and
+  a line telling the model not to obey it. The fence is a label, not a guarantee. A custom
+  backend without the `trusted` parameter keeps working and gets these notes as text.
 
 ## Providers
 

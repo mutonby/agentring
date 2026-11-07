@@ -9,7 +9,9 @@ rtc:
   port_range_end: 50100
   use_external_ip: false
 room:
-  # One short-lived room per call; the relay deletes it when the call ends.
+  # One short-lived room per call; the relay creates it and deletes it when the call
+  # ends. A join token outlives its call by up to 120 s and must not bring the room back.
+  auto_create: false
   empty_timeout: 30
   departure_timeout: 10
   max_participants: 4

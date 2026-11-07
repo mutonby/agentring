@@ -3,13 +3,15 @@ tenant keys through the hub's admin API, the daemon's RelayClient against a tena
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from agentring.relay_client import RelayClient, RelayError
 
 from .conftest import HUB_ADMIN_TOKEN
 from .test_e2e import simulate_phone_pairing
-from .test_mcp_http import Client, start  # noqa: F401 (fixture)
+from .test_mcp_http import Client, post_raw, start, until, wait_replies  # noqa: F401 (fixture)
 
 ADMIN = {"authorization": f"Bearer {HUB_ADMIN_TOKEN}"}
 
@@ -121,3 +123,56 @@ def test_an_agent_token_works_like_the_key(hub: str, start):
     httpx.post(f"{hub}/admin/v1/tenants/{tid}/api-key", headers=ADMIN)
     assert c.tool("status")["isError"]
     assert c.post({"jsonrpc": "2.0", "id": 99, "method": "ping"}).status_code == 401
+
+
+def test_a_deleted_tenants_mirror_goes_with_it(hub: str, start, tmp_path):
+    """The hub says so on the next request of a key the server still has cached."""
+    a, b = new_tenant(hub), new_tenant(hub)
+    tid_a, tid_b = a["tenant"]["tenant_id"], b["tenant"]["tenant_id"]
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, sweep_s=0)
+    ca, cb = Client(s.url, a["api_key"]), Client(s.url, b["api_key"])
+    ca.initialize()
+    cb.initialize()
+    assert not ca.tool("status")["isError"] and not cb.tool("status")["isError"]
+    tenants = tmp_path / "mcp-data" / "tenants"
+    mirror_a, mirror_b = tenants / f"{tid_a}.db", tenants / f"{tid_b}.db"
+    assert mirror_a.exists() and mirror_b.exists()
+
+    assert httpx.delete(f"{hub}/admin/v1/tenants/{tid_a}", headers=ADMIN).status_code == 204
+    assert ca.tool("status")["isError"]
+    assert until(lambda: not list(tenants.glob(f"{tid_a}*")))
+    assert mirror_b.exists()
+    assert not cb.tool("status")["isError"]
+
+
+def test_the_sweep_removes_mirrors_no_request_asks_about(hub: str, start, tmp_path):
+    a, b = new_tenant(hub), new_tenant(hub)
+    tid_a, tid_b = a["tenant"]["tenant_id"], b["tenant"]["tenant_id"]
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, sweep_s=0.2)
+    ca, cb = Client(s.url, a["api_key"]), Client(s.url, b["api_key"])
+    assert not ca.tool("status")["isError"] and not cb.tool("status")["isError"]
+    tenants = tmp_path / "mcp-data" / "tenants"
+    time.sleep(0.6)  # sweeps of live tenants change nothing, disabled ones included
+    assert httpx.patch(f"{hub}/admin/v1/tenants/{tid_b}", headers=ADMIN, json={"disabled": True}).status_code == 200
+    time.sleep(0.4)
+    assert (tenants / f"{tid_a}.db").exists() and (tenants / f"{tid_b}.db").exists()
+
+    assert httpx.delete(f"{hub}/admin/v1/tenants/{tid_a}", headers=ADMIN).status_code == 204
+    assert until(lambda: not list(tenants.glob(f"{tid_a}*")))
+    assert (tenants / f"{tid_b}.db").exists()
+
+
+def test_a_tenant_at_its_cap_does_not_slow_the_others(hub: str, start):
+    a, b = new_tenant(hub), new_tenant(hub)
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, max_inflight=2, poll_s=0.1, sweep_s=0)
+    waiting = [post_raw(s.url, wait_replies(i), key=a["api_key"]) for i in (1, 2)]
+    assert until(lambda: s.server.inflight.get(a["tenant"]["tenant_id"]) == 2)
+    assert Client(s.url, a["api_key"]).post(wait_replies(3, 0)).status_code == 429
+
+    cb = Client(s.url, b["api_key"])
+    t0 = time.time()
+    assert not cb.tool("status")["isError"]
+    assert time.time() - t0 < 2
+    for w in waiting:
+        w.close()
+    assert until(lambda: not s.server.inflight)  # a hang-up stops A's waits

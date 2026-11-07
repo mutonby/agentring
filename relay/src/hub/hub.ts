@@ -19,7 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyRequest } from "fastify";
 import { buildApp, type BuiltApp } from "../app.js";
 import { sha256 } from "../auth.js";
-import type { Config } from "../config.js";
+import { type Config, trustedHops } from "../config.js";
 import { ApiError, notFound, unauthorized } from "../errors.js";
 import { newId, randomToken } from "../ids.js";
 import { LiveKitServer, type LiveKitService } from "../livekit.js";
@@ -78,6 +78,7 @@ const errorBody = (code: string, message: string) => ({ error: { code, message }
 
 function rejectUpgrade(socket: Duplex, status: number, code: string, message: string): void {
   const body = JSON.stringify(errorBody(code, message));
+  socket.once("finish", () => socket.destroy());
   socket.end(
     `HTTP/1.1 ${status} ${code}\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`,
   );
@@ -148,7 +149,7 @@ export class Hub {
       tenant: {
         apiKeyHash: () => t.record.api_key_hash,
         limits: () => t.record.limits,
-        agentToken: (hash) => this.agentTokenValid(tenantId, hash),
+        agentToken: (hash) => this.agentTokenExpiry(tenantId, hash),
         roomPrefix: `${tenantId}.`,
       },
     });
@@ -196,7 +197,8 @@ export class Hub {
       } catch (err) {
         this.log.warn({ err, tenant: id }, "could not check tenant for open calls");
       }
-      if (open) await this.tenant(id);
+      // One tenant that can't load must not keep the hub, and every other tenant, down.
+      if (open) await this.tenant(id).catch((err: unknown) => this.log.error({ err, tenant: id }, "could not resume tenant"));
     }
   }
 
@@ -225,8 +227,11 @@ export class Hub {
     t.record = this.registry.get(t.record.tenant_id)!;
     if (limits) t.built.ctx.calls?.limitsChanged();
     if (patch.agent_name !== undefined) t.built.ctx.cfg.agentName = patch.agent_name;
-    // Turned off: drop every socket now; reconnects get 403 tenant_disabled.
-    if (patch.disabled) t.built.ctx.hub.closeAll();
+    // Turned off: end its call and drop every socket now; reconnects get 403 tenant_disabled.
+    if (patch.disabled) {
+      t.built.ctx.calls?.terminateOpen();
+      t.built.ctx.hub.closeAll();
+    }
   }
 
   /**
@@ -248,9 +253,10 @@ export class Hub {
     return e && e.expiresAt > Date.now() ? e.tenantId : undefined;
   }
 
-  private agentTokenValid(tenantId: string, hash: Buffer): boolean {
+  /** When the token expires, if it is valid for this tenant. */
+  private agentTokenExpiry(tenantId: string, hash: Buffer): number | undefined {
     const e = this.agentTokens.get(hash.toString("hex"));
-    return e !== undefined && e.tenantId === tenantId && e.expiresAt > Date.now();
+    return e !== undefined && e.tenantId === tenantId && e.expiresAt > Date.now() ? e.expiresAt : undefined;
   }
 
   private revokeAgentTokens(tenantId: string): void {
@@ -265,11 +271,15 @@ export class Hub {
     const apiKey = this.registry.rotateKey(t.record.tenant_id);
     t.record = this.registry.get(t.record.tenant_id)!;
     this.revokeAgentTokens(t.record.tenant_id);
+    // A pairing token minted with the old key must not outlive it.
+    t.built.ctx.db.prepare("DELETE FROM pairing_tokens WHERE used_at IS NULL").run();
     t.built.ctx.hub.disconnectAgent();
     return apiKey;
   }
 
   async delete(tenantId: string): Promise<void> {
+    const t = await this.loaded.get(tenantId)?.catch(() => undefined);
+    t?.built.ctx.calls?.terminateOpen();
     // Registry first: from here on no request can (re)load the tenant while it closes.
     this.registry.delete(tenantId);
     this.revokeAgentTokens(tenantId);
@@ -340,11 +350,18 @@ export async function buildHub(cfg: Config, opts: HubOptions): Promise<{ app: Fa
 
   const app = Fastify({
     logger: opts.logger ?? true,
-    trustProxy: true,
+    trustProxy: trustedHops(cfg),
     bodyLimit: 64 * 1024,
     serverFactory: (handler) => {
       const server = createServer((req, res) => void hub.handleRequest(req, res, handler));
-      server.on("upgrade", (req, socket, head) => void hub.handleUpgrade(req, socket, head));
+      server.on("upgrade", (req, socket, head) => {
+        // Node drops its own listener before this event: an unhandled socket error would end the process.
+        socket.on("error", () => socket.destroy());
+        hub.handleUpgrade(req, socket, head).catch((err: unknown) => {
+          hub.log.error({ err }, "websocket upgrade failed");
+          socket.destroy();
+        });
+      });
       return server;
     },
   });

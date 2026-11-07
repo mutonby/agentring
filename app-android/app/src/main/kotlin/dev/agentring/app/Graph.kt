@@ -61,8 +61,10 @@ object Graph {
             agentName = res.agentName,
             pushConfig = res.pushConfig,
         )
-        messages.clear()
+        // In this order: whatever reads the pairing after the clear is the new one.
         pairing.save(p)
+        messages.clear()
+        calls.onActiveCall(null)
         connection.reconnect()
         appScope.launch(Dispatchers.IO) { push.ensureRegistered() }
         return p
@@ -72,8 +74,9 @@ object Graph {
     fun unpair() {
         connection.disconnect()
         Notifications.cancelMessages(app)
-        messages.clear()
         pairing.clear()
+        messages.clear()
+        calls.onActiveCall(null)
         push.reset()
     }
 }

@@ -10,8 +10,11 @@ export type JoinInfo = Schemas["JoinInfo"];
 /** What the relay needs from LiveKit. Injectable so tests run without a LiveKit server. */
 export interface LiveKitService {
   join(room: string, identity: string, name: string): Promise<JoinInfo>;
-  /** Pre-creates the room so the first participant doesn't pay for it. Best effort. */
-  createRoom(room: string): Promise<void>;
+  /**
+   * Creates the room. Deployments run with `room.auto_create: false`, so a join token
+   * can't bring a finished call's room back. It closes after `emptyTimeoutS` with nobody in it.
+   */
+  createRoom(room: string, emptyTimeoutS?: number): Promise<void>;
   /** Disconnects everyone. Best effort: the room may already be gone. */
   deleteRoom(room: string): Promise<void>;
   /** Verifies and parses a webhook request; throws if the signature is wrong. */
@@ -39,9 +42,9 @@ export class LiveKitServer implements LiveKitService {
     };
   }
 
-  async createRoom(room: string): Promise<void> {
+  async createRoom(room: string, emptyTimeoutS = 30): Promise<void> {
     // A short empty timeout so an abandoned call doesn't keep a room around.
-    await this.rooms.createRoom({ name: room, emptyTimeout: 30, departureTimeout: 10, maxParticipants: 4 });
+    await this.rooms.createRoom({ name: room, emptyTimeout: emptyTimeoutS, departureTimeout: 10, maxParticipants: 4 });
   }
 
   async deleteRoom(room: string): Promise<void> {

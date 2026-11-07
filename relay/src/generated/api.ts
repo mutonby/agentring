@@ -47,7 +47,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create a single-use pairing token (agent only). */
+        /**
+         * Create a single-use pairing token (agent only).
+         * @description Needs the API key: a short-lived agent token (`at_…`, hub mode) gets `403`, so it
+         *     can't leave behind a credential that outlives it. Rotating the key deletes the
+         *     tenant's unused pairing tokens.
+         */
         post: operations["createPairingToken"];
         delete?: never;
         options?: never;
@@ -123,7 +128,12 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Revoke a device. Its JWT stops working immediately. */
+        /**
+         * Revoke a device. Its JWT stops working immediately.
+         * @description Needs the API key, not a short-lived agent token. If the phone is on the open
+         *     call, the call ends and its room closes; if it is only ringing there, it stops
+         *     counting, and a call left with no phone is `canceled`.
+         */
         delete: operations["revokeDevice"];
         options?: never;
         head?: never;
@@ -149,8 +159,11 @@ export interface paths {
          *     Targeted calls: the agent may pass `device_ids` to ring only those phones.
          *     The call is then private to them: the other phones get none of its events
          *     (WebSocket, push or `GET /v1/events`), do not see it in `GET /v1/calls`,
-         *     `GET /v1/calls/{call_id}` (404) or `active_call` in `GET /v1/status`, and
-         *     cannot accept, decline or join it (403).
+         *     `GET /v1/calls/{call_id}` and `POST /v1/calls/{call_id}/end` (404) or
+         *     `active_call` in `GET /v1/status`, and cannot accept, decline or join it (403).
+         *
+         *     On a plan with a call-time limit (hub mode), `429 rate_limited` after 20
+         *     unanswered calls in an hour. A self-hosted relay has no such limit.
          */
         post: operations["createCall"];
         delete?: never;
@@ -292,7 +305,9 @@ export interface paths {
          * Hang up. While ringing, only the caller may call this (→ `canceled`).
          * @description On an active agent call a phone only leaves; the call ends (`ended`) when the
          *     agent hangs up or the last phone leaves (after the ring window, or once no
-         *     other phone is still ringing).
+         *     other phone is still ringing). A call to the agent belongs to the phone that
+         *     placed it: any other phone gets `403`. A targeted call doesn't exist for phones
+         *     outside it: `404`, in every state.
          */
         post: operations["endCall"];
         delete?: never;
@@ -408,9 +423,12 @@ export interface paths {
          * WebSocket event stream.
          * @description Upgrade to WebSocket. The server sends one JSON `Event` per text frame:
          *     first `ws.hello`, then every persisted event with `seq > after_seq`,
-         *     then live events. Clients send nothing (ping/pong keepalive every 20 s).
-         *     Close codes: 4401 unauthorized/revoked, 4409 replaced by a newer agent
-         *     connection (only one daemon socket at a time).
+         *     then live events. Clients send nothing (ping/pong keepalive every 20 s; the
+         *     pong must echo the ping's payload, as WebSocket libraries do). Replay is paced
+         *     by the client: one that stops reading is dropped and resumes with `after_seq`.
+         *     Close codes: 4401 unauthorized/revoked or expired agent token, 4409 replaced by
+         *     a newer agent connection (only one daemon socket at a time), 1013 too many
+         *     sockets (a phone keeps its 4 newest; a relay or tenant holds 64).
          */
         get: operations["eventStream"];
         put?: never;
@@ -1060,6 +1078,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -1132,6 +1151,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description `agent_offline` (device caller, no daemon connected) or `calls_unavailable` (LiveKit is not configured on this relay). */
             503: {
                 headers: {
