@@ -99,6 +99,9 @@ class StaleRelayWorkTest {
 
     @Before
     fun start() {
+        // ProcessLifecycleOwner reports the previous test's activity stopping about 700 ms
+        // later: let that pass, or it marks the connection as in the background mid-test.
+        Thread.sleep(1_500)
         Graph.unpair()
         Graph.connection.onStart(lifecycle)
     }
@@ -116,6 +119,7 @@ class StaleRelayWorkTest {
         assertTrue("old relay never asked", old.messagesAsked.await(10, TimeUnit.SECONDS))
         Graph.unpair()
         Graph.pairing.save(pairing(next.url, "b"))
+        Graph.connection.onStart(lifecycle)
         Graph.connection.reconnect()
         assertTrue("new relay never asked", next.messagesAsked.await(10, TimeUnit.SECONDS))
         waitFor("the new relay's message") { Graph.messages.messages.value.any { it.msgId == "msg_00000000000000000000000001" } }
