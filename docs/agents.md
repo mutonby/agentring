@@ -43,7 +43,13 @@ client's MCP tool timeout if it has a short one (Codex: 60 s, opencode: 30 s).
 
 `context` is everything the voice AI knows about the agent's work: put in it what
 to tell you, what to ask and what not to decide. If `~/.agentring/agents.yaml` exists,
-the voice AI on these calls can also consult your agents.
+the voice AI on these calls can also consult your agents, but only once you have spoken
+on the call: `context` may hold text the calling agent read elsewhere, and that alone
+must not start a tool ([voice.md](voice.md#as-a-library)).
+
+With `agentring mcp --device`, the call is private to those phones. If nobody answers,
+or an agent's answer comes after the call, nothing is sent as a message, because a
+message reaches every paired phone: the calling agent still gets the result.
 
 The server is a small JSON-RPC loop with no MCP SDK and no extra dependencies
 (see [architecture](architecture.md#accepted-deviations)). For an MCP URL instead of
@@ -151,8 +157,10 @@ mcp:                         # MCP servers over Streamable HTTP; their tools go 
   replaced inside the argument that contains it, and if no argument has it, the
   task goes to stdin. The agent's stdout is the answer. A non-zero exit is an
   error, with the end of stderr.
-- Don't let the task be read as an option: put `--` before `{task}`, or text before
-  it in the same argument (`"Task: {task}"`).
+- The task is never read as an option. As a whole argument with no `--` before it, a
+  task that starts with `-` is passed as `Task: -…`, so `[claude, -p, "{task}"]` is safe.
+  You still choose what the agent sees: put `--` before `{task}`, or text before it in
+  the same argument (`"Task: {task}"`), and it is passed as it is.
 - The agent runs with your environment plus `env` and `AGENTRING_CALL_ID`, in `cwd`.
   The call id lets an agent keep one session per call (see [OpenClaw](#openclaw)).
 - **`description` matters**: the voice AI picks the agent by it.

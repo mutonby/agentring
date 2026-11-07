@@ -87,7 +87,7 @@ class OpenAIRealtime:
     async def send_audio(self, pcm: bytes) -> None:
         await self._ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": base64.b64encode(pcm).decode()}))
 
-    async def send_text(self, text: str, *, respond: bool) -> None:
+    async def send_text(self, text: str, *, respond: bool, trusted: bool = True) -> None:
         await self._ws.send(json.dumps({"type": "conversation.item.create", "item": {
             "type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}}))
         if respond:

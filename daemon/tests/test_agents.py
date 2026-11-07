@@ -59,6 +59,28 @@ def test_task_is_one_argument_never_a_shell():
     assert out == "['--task=rm -rf / ; echo \"$HOME\" `id`']"
 
 
+@pytest.mark.parametrize("command, task, expected", [
+    # Whole argument, nothing guarding it: the option stays text.
+    (["claude", "-p", "{task}"], "--permission-mode=acceptEdits", ["claude", "-p", "Task: --permission-mode=acceptEdits"]),
+    (["agent", "{task}"], "-x", ["agent", "Task: -x"]),
+    (["agent", "{task}", "--"], "-x", ["agent", "Task: -x", "--"]),  # the `--` comes too late
+    (["agent", "--flag", "{task}"], "---", ["agent", "--flag", "Task: ---"]),
+    # Nothing to do: no leading dash, already after `--`, or inside a longer argument.
+    (["claude", "-p", "{task}"], "what is -x?", ["claude", "-p", "what is -x?"]),
+    (["claude", "-p", "--", "{task}"], "--yolo", ["claude", "-p", "--", "--yolo"]),
+    (["opencode", "run", "Task: {task}"], "--yolo", ["opencode", "run", "Task: --yolo"]),
+    (["agent", "--message={task}"], "--yolo", ["agent", "--message=--yolo"]),
+])
+def test_task_is_never_an_option(command, task, expected):
+    assert CommandAgent("t", "x", command).argv(task) == (expected, None)
+
+
+def test_task_with_a_dash_reaches_a_real_parser_as_text():
+    code = ("import argparse; p = argparse.ArgumentParser(); p.add_argument('--evil', action='store_true'); "
+            "p.add_argument('task'); a = p.parse_args(); print(a.evil, a.task)")
+    assert asyncio.run(CommandAgent("t", "x", [PY, "-c", code, "{task}"]).ask("--evil")) == "False Task: --evil"
+
+
 def test_task_on_stdin_without_placeholder(tmp_path):
     a = CommandAgent("t", "x", [PY, "-c", "import os, sys; print(os.getcwd(), os.environ['X'], sys.stdin.read())"],
                      cwd=str(tmp_path), env={"X": "1"})
@@ -79,13 +101,14 @@ def test_failure_and_timeout():
 class _FakeSession:
     class info:  # noqa: N801
         call_id = "call_1"
+        device_ids = None
 
     def __init__(self, relay=None):
         self.done = asyncio.Event()
         self.notes: list[tuple[str, bool]] = []
         self.relay = relay
 
-    def notify(self, text, *, respond=False):
+    def notify(self, text, *, respond=False, trusted=True):
         self.notes.append((text, respond))
 
 
@@ -146,6 +169,38 @@ def test_answer_after_the_call_goes_to_the_phone_as_a_message():
     notes, messages = asyncio.run(run())
     assert notes == []
     assert len(messages) == 1 and "after the call" in messages[0] and "late backup" in messages[0]
+
+
+def test_answer_after_a_targeted_call_goes_to_no_phone():
+    """A message reaches every paired phone; the call was private to some of them."""
+    async def run():
+        relay = _FakeRelay()
+        c, s = _agents(), _FakeSession(relay)
+        s.info = type("Info", (), {"call_id": "call_1", "device_ids": ["dev_A"]})
+        _session.set(s)
+        await c.consult("slow", "backup")
+        s.done.set()
+        await c.drain(5)
+        return s.notes, relay.messages
+
+    assert asyncio.run(run()) == ([], [])
+
+
+def test_late_answer_is_marked_as_not_trusted():
+    notes = []
+
+    class Session(_FakeSession):
+        def notify(self, text, *, respond=False, trusted=True):
+            notes.append((respond, trusted))
+
+    async def run():
+        c, s = _agents(), Session()
+        _session.set(s)
+        await c.consult("slow", "x")
+        await c.drain(5)
+
+    asyncio.run(run())
+    assert notes == [(True, False)]
 
 
 def test_close_stops_agents_still_working():

@@ -82,7 +82,7 @@ class GeminiLive:
         await self._ws.send(json.dumps({"realtimeInput": {"audio": {
             "data": base64.b64encode(pcm).decode(), "mimeType": f"audio/pcm;rate={self.input_rate}"}}}))
 
-    async def send_text(self, text: str, *, respond: bool) -> None:
+    async def send_text(self, text: str, *, respond: bool, trusted: bool = True) -> None:
         await self._ws.send(json.dumps({"clientContent": {
             "turns": [{"role": "user", "parts": [{"text": text}]}], "turnComplete": respond}}))
 
