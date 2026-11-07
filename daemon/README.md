@@ -5,7 +5,7 @@ CLI, the MCP server (`agentring mcp`) and the voice AI for calls. It lets your A
 agents message and call your phone, and lets you call them back.
 
 ```bash
-uv tool install 'agentring[voice]'   # or, from a checkout: uv tool install './daemon[voice]'
+uv tool install 'agentring[voice] @ git+https://github.com/mutonby/agentring#subdirectory=daemon'   # or, from a checkout: uv tool install './daemon[voice]'
 agentring init --relay https://relay.example.com --api-key ak_...
 agentring pair                       # scan the QR with the Android app
 agentring msg "hola"

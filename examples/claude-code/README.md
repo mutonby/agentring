@@ -17,7 +17,7 @@ https://aistudio.google.com/apikey), or the key of another voice provider (OpenA
 Phonic: [docs/voice.md](../../docs/voice.md#providers)):
 
 ```bash
-uv tool install 'agentring[voice]'
+uv tool install 'agentring[voice] @ git+https://github.com/mutonby/agentring#subdirectory=daemon'
 echo GEMINI_API_KEY=... >> ~/.agentring/.env
 ```
 

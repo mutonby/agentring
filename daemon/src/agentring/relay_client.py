@@ -22,14 +22,18 @@ _SINGLE_LABEL = re.compile(r"^[a-z0-9_]([a-z0-9_-]*[a-z0-9_])?$")
 _NUMERIC_HOST = re.compile(r"^(0x[0-9a-f]+|[0-9]+)$")  # 134744072 is 8.8.8.8 to the resolver
 
 
+_PRIVATE_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa", ".ts.net")
+
+
 def is_private_host(host: str) -> bool:
     """A host whose traffic stays on a network of the user's: loopback, private ranges, CGNAT,
-    mDNS (.local), or a single-label name, which only resolves inside one (`relay` in Docker)."""
+    names reserved for private use (.local, .internal, .lan, .home.arpa, a tailnet's .ts.net), or a
+    single-label name, which only resolves inside one (`relay` in Docker)."""
     h = host.lower().rstrip(".")
     try:
         ip = ipaddress.ip_address(h)
     except ValueError:
-        if h == "localhost" or h.endswith((".localhost", ".local")):
+        if h == "localhost" or h.endswith(_PRIVATE_SUFFIXES):
             return True
         return bool(_SINGLE_LABEL.match(h)) and not _NUMERIC_HOST.match(h)
     ip = getattr(ip, "ipv4_mapped", None) or ip

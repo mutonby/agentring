@@ -317,3 +317,12 @@ def test_redirects_and_non_json_are_relay_errors():
         with pytest.raises(RelayError) as e:
             c.list_events()
         assert e.value.code == "bad_response"
+
+
+def test_private_name_suffixes_may_use_http():
+    from agentring.relay_client import is_private_host
+
+    for host in ("host.docker.internal", "nas.lan", "box.tail1234.ts.net", "pi.home.arpa", "relay", "pi.local"):
+        assert is_private_host(host), host
+    for host in ("relay.example.com", "lan.example.com", "evil.internal.example.com"):
+        assert not is_private_host(host), host
