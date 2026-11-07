@@ -86,12 +86,18 @@ jobs:
             (async () => {
               const rooms = new RoomServiceClient(process.env.LIVEKIT_API_URL, key, secret);
               await rooms.createRoom({ name: "ci-smoke" });
-              await rooms.deleteRoom("ci-smoke");
               const t = new AccessToken(key, secret, { identity: "ci" });
               t.addGrant({ roomJoin: true, room: "ci-smoke" });
               console.log(await t.toJwt());
             })().catch((e) => { console.error(e); process.exit(1); });' | tr -d '\r')
           curl -skf "https://localhost/rtc/validate?access_token=$TOKEN"
+          # The room is gone once closed: rooms are only created by the relay (auto_create: false).
+          docker compose exec -T relay node -e '
+            const { RoomServiceClient } = require("livekit-server-sdk");
+            const secret = require("fs").readFileSync(process.env.LIVEKIT_API_SECRET_FILE, "utf8").trim();
+            new RoomServiceClient(process.env.LIVEKIT_API_URL, process.env.LIVEKIT_API_KEY, secret)
+              .deleteRoom("ci-smoke").catch((e) => { console.error(e); process.exit(1); });'
+          test "$(curl -sk -o /dev/null -w '%{http_code}' "https://localhost/rtc/validate?access_token=$TOKEN")" = 404
           sleep 3
           docker compose logs --no-color --since "$SINCE" relay > "$RUNNER_TEMP/relay-webhook.log"
           ids=$(grep '"url":"/v1/livekit/webhook"' "$RUNNER_TEMP/relay-webhook.log" | grep -o '"reqId":"[^"]*"' | sort -u)
