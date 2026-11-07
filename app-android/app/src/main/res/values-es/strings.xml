@@ -38,6 +38,10 @@
     <string name="call_agent_hint">Habla con %1$s por voz.</string>
     <string name="call_agent_offline">El agente está desconectado</string>
     <string name="call_agent_busy">Hay otra llamada en curso</string>
+    <string name="call_agent_quota">Se han acabado los minutos de llamada de este mes</string>
+    <string name="call_ended_quota">Llamada terminada: se han acabado los minutos de llamada de este mes</string>
+    <string name="message_quota">Has llegado al límite de mensajes de hoy</string>
+    <string name="plan_open_dashboard">Abrir tu panel</string>
     <string name="call_agent_unavailable">Las llamadas no están configuradas en tu relay (LiveKit)</string>
     <string name="call_agent_declined">El agente ha rechazado la llamada</string>
     <string name="call_agent_no_answer">El agente no ha contestado</string>

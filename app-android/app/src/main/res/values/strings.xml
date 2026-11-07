@@ -42,6 +42,10 @@
     <string name="call_agent_hint">Talk to %1$s by voice.</string>
     <string name="call_agent_offline">The agent is offline</string>
     <string name="call_agent_busy">Another call is in progress</string>
+    <string name="call_agent_quota">This month\'s call minutes are used up</string>
+    <string name="call_ended_quota">Call ended: this month\'s call minutes are used up</string>
+    <string name="message_quota">Today\'s message limit is reached</string>
+    <string name="plan_open_dashboard">Open your dashboard</string>
     <string name="call_agent_unavailable">Calls are not set up on your relay (LiveKit)</string>
     <string name="call_agent_declined">The agent declined the call</string>
     <string name="call_agent_no_answer">The agent didn\'t answer</string>

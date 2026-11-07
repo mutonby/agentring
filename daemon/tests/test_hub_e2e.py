@@ -38,7 +38,7 @@ def test_mcp_http_against_a_hub(hub: str, start):
         except RelayError as e:
             assert e.status == 401
 
-    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, poll_s=0.3)
+    s = start(admin_url=hub, admin_token=HUB_ADMIN_TOKEN, poll_s=0.3, upgrade_url="https://cloud.example/app#usage")
     ca = Client(s.url, a["api_key"])
     ca.initialize()
     st = ca.tool("status")["structuredContent"]
@@ -56,6 +56,7 @@ def test_mcp_http_against_a_hub(hub: str, start):
     assert not cb.tool("send_message", text="one")["isError"]
     over = cb.tool("send_message", text="two")
     assert over["isError"] and "quota_exceeded" in over["content"][0]["text"]
+    assert "upgrade to Pro at https://cloud.example/app#usage" in over["content"][0]["text"]
 
     # Unknown and disabled accounts get 401 from the MCP server.
     assert Client(s.url, "ak_unknown").post({"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code == 401

@@ -16,6 +16,7 @@ import asyncio
 import copy
 import json
 import logging
+import os
 import sys
 import threading
 import time
@@ -119,6 +120,15 @@ class CallSlots:
         self.used = max(0, self.used - 1)
 
 
+def quota_note(upgrade_url: str | None) -> str:
+    """What the agent reads when the user's hosted plan ran out (`quota_exceeded`, or a call
+    the relay ended because the month's minutes were used up)."""
+    note = "The user's agentring plan limit is reached."
+    if upgrade_url:
+        note += f" They can upgrade to Pro at {upgrade_url} ; tell them, with this link."
+    return note
+
+
 class AgentringTools:
     """The MCP tools for one relay (one user). Transport-agnostic: the stdio server has one,
     the HTTP server one per tenant.
@@ -128,11 +138,14 @@ class AgentringTools:
     servers on calls; None = none (the HTTP server never runs local commands for its users).
     `call_slots` caps voice calls across instances. `before_tool` gates the voice AI's tools on
     calls (see `VoiceAgent`); the default is `after_user_speech`, because `context` comes from the
-    calling agent, which may be passing on text it read elsewhere: nothing runs on that text alone."""
+    calling agent, which may be passing on text it read elsewhere: nothing runs on that text alone.
+    `upgrade_url` (hosted relays) is where the user can raise their plan's limits; it goes into
+    quota errors."""
 
     def __init__(self, client: RelayClient, store: Store, *, relay_url: str | None = None, poll_s: float = 2.0,
                  agent_name: str | None = None, device_ids: list[str] | None = None,
-                 agents_file: Path | None = None, call_slots: CallSlots | None = None, before_tool: Any = None):
+                 agents_file: Path | None = None, call_slots: CallSlots | None = None, before_tool: Any = None,
+                 upgrade_url: str | None = None):
         self.client = client
         self.store = store
         self.relay_url = relay_url or client.relay_url
@@ -141,6 +154,7 @@ class AgentringTools:
         self.agents_file = agents_file
         self.call_slots = call_slots
         self.before_tool = before_tool
+        self.upgrade_url = upgrade_url
         self.poll_s = poll_s
         self._call_lock = asyncio.Lock()
         self._db = threading.Lock()  # tool calls run concurrently, each in a thread
@@ -150,6 +164,7 @@ class AgentringTools:
     def from_settings(cls, settings: Settings, **kw: Any) -> AgentringTools:
         """The local daemon's relay, store and agents.yaml (what `agentring mcp` uses)."""
         kw.setdefault("agents_file", home_dir() / "agents.yaml")
+        kw.setdefault("upgrade_url", os.environ.get("AGENTRING_UPGRADE_URL") or None)
         return cls(RelayClient(settings.relay_url, settings.api_key), Store(settings.db_path),
                    relay_url=settings.relay_url, **kw)
 
@@ -264,8 +279,22 @@ class AgentringTools:
             except RelayError as e:
                 log.warning("could not send the missed-call message: %s", e)
         out = asdict(r)
+        if r.answered and r.end_reason != "end_call":
+            note = await self.quota_cutoff_note(r.call_id)
+            if note:
+                out["note"] = note
         out["transcript"] = [{"who": "user" if role == "user" else "voice_ai", "text": t} for role, t in r.transcript]
         return out
+
+    async def quota_cutoff_note(self, call_id: str) -> str | None:
+        """A note for the agent when the relay ended the call because the month's minutes ran out."""
+        try:
+            call = await asyncio.to_thread(self.client.get_call, call_id)
+        except RelayError:
+            return None
+        if call.get("end_reason") != "quota":
+            return None
+        return "The call was cut off: the month's call minutes ran out. " + quota_note(self.upgrade_url)
 
     async def status(self) -> dict[str, Any]:
         st = await asyncio.to_thread(self.client.status)
@@ -337,7 +366,12 @@ async def call_tool(tools: AgentringTools, name: Any, args: Any) -> dict[str, An
                 "structuredContent": out, "isError": False}
     except TypeError as e:
         return _tool_error(f"bad arguments: {e}")
-    except (RelayError, ToolError) as e:
+    except RelayError as e:
+        text = str(e)
+        if e.code == "quota_exceeded":
+            text += " " + quota_note(tools.upgrade_url)
+        return _tool_error(text)
+    except ToolError as e:
         return _tool_error(str(e))
     except Exception as e:
         log.exception("tool %s failed", name)

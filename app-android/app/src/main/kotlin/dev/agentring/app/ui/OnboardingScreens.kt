@@ -95,6 +95,9 @@ internal fun Pairing.isCloud(): Boolean {
     return Uri.parse(relayUrl).host.equals(cloud, ignoreCase = true)
 }
 
+/** The hosted service's dashboard (usage, plan), or null when the relay is self-hosted. */
+internal fun Pairing.dashboardUrl(): String? = if (isCloud()) BuildConfig.CLOUD_URL.trimEnd('/') + "/app#usage" else null
+
 @Composable
 fun OnboardingFlow(paired: Pairing?, onFinished: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(if (paired != null) Step.CALLS else Step.WELCOME) }

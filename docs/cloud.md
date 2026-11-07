@@ -112,6 +112,9 @@ deleting the tenant or restarting the relay revokes them.
   environment, as for `agentring call --ai`), with a global cap on concurrent calls
   (`AGENTRING_MCP_MAX_CALLS`, default 4; over it the tool error is `busy`). The
   relay's own one-call-per-tenant rule still applies. `agents.yaml` is never used.
+- **Plan limits:** a `quota_exceeded` tool error ends with "The user's agentring plan
+  limit is reached" and, with `AGENTRING_UPGRADE_URL` set, the link to upgrade; a call
+  the relay ended for minutes (`end_reason: quota`) returns a `note` saying so.
 - **Long requests:** `call` and a waiting `get_replies` answer as `text/event-stream`
   with an SSE keep-alive comment every 15 s.
 - **State:** per tenant, the daemon's usual SQLite mirror (`Store`, synced with the

@@ -6,6 +6,8 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.app.RemoteInput
 import dev.agentring.app.Graph
+import dev.agentring.app.R
+import dev.agentring.core.RelayException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -30,7 +32,9 @@ class ReplyReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 Log.w("ReplyReceiver", "reply failed", e)
                 Notifications.cancelMessages(appContext)
-                Notifications.showReplyFailed(appContext, text, e.message ?: e.javaClass.simpleName)
+                val why = if (e is RelayException && e.code == "quota_exceeded") appContext.getString(R.string.message_quota)
+                else e.message ?: e.javaClass.simpleName
+                Notifications.showReplyFailed(appContext, text, why)
             } finally {
                 pending.finish()
             }

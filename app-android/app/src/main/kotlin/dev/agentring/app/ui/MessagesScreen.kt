@@ -46,6 +46,7 @@ import dev.agentring.app.R
 import dev.agentring.app.data.Pairing
 import dev.agentring.app.notify.Notifications
 import dev.agentring.core.Message
+import dev.agentring.core.RelayException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,6 +60,7 @@ fun MessagesScreen(pairing: Pairing) {
     var input by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var sendError by remember { mutableStateOf<String?>(null) }
+    var overQuota by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     DisposableEffect(Unit) {
@@ -121,11 +123,12 @@ fun MessagesScreen(pairing: Pairing) {
 
         sendError?.let {
             Text(
-                stringResource(R.string.send_failed, it),
+                if (overQuota) stringResource(R.string.message_quota) else stringResource(R.string.send_failed, it),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+            if (overQuota) PlanDashboardButton(pairing)
         }
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -147,6 +150,7 @@ fun MessagesScreen(pairing: Pairing) {
                     scope.launch {
                         sending = true
                         sendError = null
+                        overQuota = false
                         try {
                             val generation = Graph.messages.generation
                             val api = Graph.api() ?: error("not paired")
@@ -157,6 +161,7 @@ fun MessagesScreen(pairing: Pairing) {
                             input = ""
                         } catch (e: Exception) {
                             sendError = e.message ?: e.javaClass.simpleName
+                            overQuota = e is RelayException && e.code == "quota_exceeded"
                         } finally {
                             sending = false
                         }

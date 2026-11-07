@@ -326,3 +326,58 @@ def test_private_name_suffixes_may_use_http():
         assert is_private_host(host), host
     for host in ("relay.example.com", "lan.example.com", "evil.internal.example.com"):
         assert not is_private_host(host), host
+# ------------------------------------------------------------------ quota errors (hosted plans)
+
+
+def test_quota_errors_tell_the_agent_where_to_upgrade(monkeypatch, tmp_path):
+    import asyncio
+
+    from agentring.mcp_server import AgentringTools, call_tool, quota_note
+    from agentring.relay_client import RelayError
+
+    class Tools:
+        upgrade_url = "https://cloud.example/app#usage"
+
+        async def send_message(self, text: str):
+            raise RelayError(402, "quota_exceeded", "Your plan allows 100 messages per day")
+
+        async def status(self):
+            raise RelayError(409, "busy", "Another call is in progress")
+
+    out = asyncio.run(call_tool(Tools(), "send_message", {"text": "hi"}))
+    text = out["content"][0]["text"]
+    assert out["isError"]
+    assert text.startswith("quota_exceeded: Your plan allows 100 messages per day (HTTP 402)")
+    assert "upgrade to Pro at https://cloud.example/app#usage" in text
+    # Other errors are untouched.
+    assert asyncio.run(call_tool(Tools(), "status", {}))["content"][0]["text"] == "busy: Another call is in progress (HTTP 409)"
+    # Without a URL (self-hosted relay with limits) the note still names the cause.
+    assert quota_note(None) == "The user's agentring plan limit is reached."
+
+    monkeypatch.setenv("AGENTRING_UPGRADE_URL", "https://x.example/up")
+    from agentring.config import Settings
+
+    t = AgentringTools.from_settings(Settings(relay_url="http://127.0.0.1:1", api_key="ak_x", home=tmp_path), agents_file=None)
+    assert t.upgrade_url == "https://x.example/up"
+
+
+def test_call_cut_off_by_the_quota_gets_a_note():
+    import asyncio
+
+    from agentring.mcp_server import AgentringTools
+    from agentring.relay_client import RelayError
+
+    class Client:
+        relay_url = "http://relay"
+        calls = {"c1": {"end_reason": "quota"}, "c2": {"end_reason": "hangup"}}
+
+        def get_call(self, call_id):
+            if call_id not in self.calls:
+                raise RelayError(404, "not_found", "Call not found")
+            return self.calls[call_id]
+
+    t = AgentringTools(Client(), store=None, upgrade_url="https://cloud.example/app#usage")  # type: ignore[arg-type]
+    note = asyncio.run(t.quota_cutoff_note("c1"))
+    assert note and note.startswith("The call was cut off") and "https://cloud.example/app#usage" in note
+    assert asyncio.run(t.quota_cutoff_note("c2")) is None
+    assert asyncio.run(t.quota_cutoff_note("nope")) is None

@@ -87,6 +87,7 @@ agentring mcp-http --relay-url https://relay.example.com          # listens on 1
 | | `AGENTRING_HUB_ADMIN_URL`, `AGENTRING_HUB_ADMIN_TOKEN_FILE` or `AGENTRING_HUB_ADMIN_TOKEN` | | Hub mode: keys are resolved to their tenant ([cloud.md](cloud.md#remote-mcp-server)). |
 | `--data-dir` | `AGENTRING_MCP_DATA_DIR` | `~/.agentring/mcp-http` | Per-user state, one SQLite file per tenant. |
 | `--max-calls` | `AGENTRING_MCP_MAX_CALLS` | `4` | Voice calls at once, all users together; one more gets the tool error `busy`. |
+| | `AGENTRING_UPGRADE_URL` | none | Hosted plans: where users raise their limits. Added to `quota_exceeded` tool errors and to the result of a call the relay cut off for minutes, so the agent can pass the link on. `agentring mcp` (stdio) reads it too. |
 | `--max-body` | `AGENTRING_MCP_MAX_BODY` | `1048576` | Largest request body (bytes); larger gets 413. |
 | `--allow-origin` | `AGENTRING_MCP_ALLOWED_ORIGINS` (comma-separated) | none | Browser `Origin`s allowed to use `/mcp` (`*` = any). Requests from any other Origin get 403; MCP clients that are not browsers send none. |
 

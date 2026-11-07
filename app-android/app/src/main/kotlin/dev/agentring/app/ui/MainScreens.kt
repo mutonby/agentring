@@ -277,6 +277,18 @@ private fun CallAgentButton(pairing: Pairing, relayConnected: Boolean, agentOnli
         textAlign = TextAlign.Center,
         modifier = Modifier.testTag("call_agent_hint"),
     )
+    if (error == R.string.call_agent_quota) PlanDashboardButton(pairing)
+}
+
+/** Plan limit reached on the hosted service: a way to its web dashboard (usage and plan). */
+@Composable
+internal fun PlanDashboardButton(pairing: Pairing) {
+    val url = pairing.dashboardUrl() ?: return
+    val ctx = LocalContext.current
+    TextButton(
+        onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+        modifier = Modifier.testTag("plan_dashboard"),
+    ) { Text(stringResource(R.string.plan_open_dashboard)) }
 }
 
 /** A group call is going on without this phone: join it. */

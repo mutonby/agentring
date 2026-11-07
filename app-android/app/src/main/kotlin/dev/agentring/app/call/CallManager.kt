@@ -327,6 +327,7 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
             return when (e.code) {
                 "agent_offline" -> R.string.call_agent_offline
                 "busy" -> R.string.call_agent_busy
+                "quota_exceeded" -> R.string.call_agent_quota
                 "calls_unavailable" -> R.string.call_agent_unavailable
                 else -> R.string.call_failed
             }
@@ -490,10 +491,16 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
             when (event) {
                 // Group calls: another phone answering or declining doesn't stop ours
                 // ringing; we can still join until the call stops ringing.
-                is Event.CallEnd -> if (event.callId == info.callId && cur !is CallUi.Ended) {
-                    val missed = cur is CallUi.Incoming
-                    finish(info, if (missed) R.string.call_missed else R.string.call_ended_by_agent,
-                        if (missed) DisconnectCause.CANCELED else DisconnectCause.REMOTE, notifyMissed = missed)
+                is Event.CallEnd -> if (event.callId == info.callId) {
+                    val quota = event.reason == "quota" // the relay cut the call: the month's minutes ran out
+                    if (cur is CallUi.Ended) {
+                        // The voice session may notice first ("ended by the agent"): say why instead.
+                        if (quota) _state.value = cur.copy(messageRes = R.string.call_ended_quota)
+                    } else {
+                        val missed = cur is CallUi.Incoming
+                        finish(info, if (missed) R.string.call_missed else if (quota) R.string.call_ended_quota else R.string.call_ended_by_agent,
+                            if (missed) DisconnectCause.CANCELED else DisconnectCause.REMOTE, notifyMissed = missed)
+                    }
                 }
                 is Event.CallMissed -> if (event.callId == info.callId && cur is CallUi.Incoming) {
                     finish(info, R.string.call_missed, DisconnectCause.MISSED, notifyMissed = true)

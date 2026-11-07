@@ -111,6 +111,7 @@ class HttpConfig:
     max_response: int = DEFAULT_MAX_RESPONSE
     write_timeout_s: float = WRITE_TIMEOUT_S
     sweep_s: float = SWEEP_S  # 0 = no sweep
+    upgrade_url: str | None = None  # hosted: where users raise their plan's limits (added to quota errors)
 
     @property
     def hub(self) -> bool:
@@ -171,6 +172,7 @@ class HttpConfig:
             max_tenant_connections=pick("max_tenant_connections", "AGENTRING_MCP_MAX_TENANT_CONNECTIONS",
                                         MAX_CONNECTIONS_PER_TENANT, int),
             sweep_s=pick("sweep_s", "AGENTRING_MCP_SWEEP_S", SWEEP_S, float),
+            upgrade_url=env("AGENTRING_UPGRADE_URL") or None,
         )
         if data_dir is not None:
             cfg.data_dir = Path(data_dir).expanduser()
@@ -340,7 +342,8 @@ class TenantPool:
     another request's credentials (e.g. the old and new key during a rotation). Idle tenants are
     closed when more than `max_open` are open; their state stays on disk until `purge`."""
 
-    def __init__(self, data_dir: Path, *, call_slots: CallSlots, poll_s: float = 2.0, max_open: int = MAX_OPEN_TENANTS):
+    def __init__(self, data_dir: Path, *, call_slots: CallSlots, poll_s: float = 2.0, max_open: int = MAX_OPEN_TENANTS,
+                 upgrade_url: str | None = None):
         self.dir = data_dir / "tenants"
         self.dir.mkdir(parents=True, exist_ok=True)
         for d in (data_dir, self.dir):
@@ -351,6 +354,7 @@ class TenantPool:
         self.call_slots = call_slots
         self.poll_s = poll_s
         self.max_open = max_open
+        self.upgrade_url = upgrade_url
         self._open: dict[str, _Open] = {}
 
     def acquire(self, tenant: Tenant, api_key: str) -> AgentringTools:
@@ -364,7 +368,7 @@ class TenantPool:
             client = RelayClient(tenant.base_url, api_key)
             tools = AgentringTools(client, Store(self.dir / f"{tenant.tenant_id}.db"),
                                    relay_url=tenant.base_url, poll_s=self.poll_s, agents_file=None,
-                                   call_slots=self.call_slots)
+                                   call_slots=self.call_slots, upgrade_url=self.upgrade_url)
             e = self._open[tenant.tenant_id] = _Open(tools, tenant.base_url, {key_hash(api_key): client})
         h = key_hash(api_key)
         client = e.clients.get(h)
@@ -503,7 +507,8 @@ class McpHttpServer:
         self.cfg = cfg
         self.resolver = resolver or KeyResolver(cfg)
         self.call_slots = CallSlots(cfg.max_calls)
-        self.pool = TenantPool(cfg.data_dir, call_slots=self.call_slots, poll_s=cfg.poll_s)
+        self.pool = TenantPool(cfg.data_dir, call_slots=self.call_slots, poll_s=cfg.poll_s,
+                               upgrade_url=cfg.upgrade_url)
         self.sessions: dict[str, Session] = {}
         self._tenant_sessions: dict[str, set[str]] = {}
         self.inflight: dict[str, int] = {}  # tool calls running, by tenant
