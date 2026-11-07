@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import random
+import re
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 import websockets
@@ -20,19 +22,35 @@ log = logging.getLogger("agentring.sync")
 
 CLOSE_UNAUTHORIZED = 4401
 CLOSE_REPLACED = 4409
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 class FatalSyncError(Exception):
     """Reconnecting will not help (bad API key, another daemon took over)."""
 
 
+def _clean(s: Any) -> Any:
+    """A lone surrogate (half an emoji from a client that cut a string) can't be stored as
+    UTF-8: U+FFFD instead, which is what the relay's own messages table keeps."""
+    return _LONE_SURROGATE.sub("\ufffd", s) if isinstance(s, str) else s
+
+
 def apply_event(store: Store, event: dict[str, Any]) -> None:
-    """Applies one relay event to the local store. Idempotent."""
+    """Applies one relay event to the local store. Idempotent.
+
+    An event we can't store is logged and skipped, and the cursor moves past it: the event
+    log keeps it for good, so stopping here would stop sync on every run. sqlite3.Error is
+    left to the caller on purpose: a database that is locked for a moment says nothing about
+    the event, and moving the cursor then would lose a good message."""
     t = event.get("type")
-    if t == "msg.new":
-        store.upsert_message(event["msg_id"], event["from"], event["text"], event["ts"], event.get("reply_to"))
-    elif t == "msg.read":
-        store.mark_read(event["msg_id"], event["ts"])
+    try:
+        if t == "msg.new":
+            store.upsert_message(event["msg_id"], event["from"], _clean(event["text"]), event["ts"],
+                                 _clean(event.get("reply_to")))
+        elif t == "msg.read":
+            store.mark_read(event["msg_id"], event["ts"])
+    except (ValueError, KeyError, TypeError) as e:
+        log.warning("skipping event seq=%s (%s): %s", event.get("seq"), t, type(e).__name__)
     seq = event.get("seq")
     if isinstance(seq, int):
         store.advance_seq(seq)

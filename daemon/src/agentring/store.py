@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("agentring.store")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -22,10 +26,26 @@ CREATE INDEX IF NOT EXISTS messages_created ON messages(created_at);
 """
 
 
+def _make_private(path: Path) -> None:
+    """The mirror holds the user's messages, however the daemon was configured: only the owner
+    reads it. A new directory is created 0700 (an existing one may be shared and is left alone)
+    and the database 0600 before SQLite opens it; SQLite gives its -wal and -shm files the
+    database's mode. Files from an earlier version are tightened."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.close(os.open(path, os.O_CREAT | os.O_RDWR, 0o600))
+    for f in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        try:
+            f.chmod(0o600)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            log.warning("cannot make %s private: %s", f, e)
+
+
 class Store:
     def __init__(self, path: Path | str):
         if str(path) != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            _make_private(Path(path))
         self.db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")

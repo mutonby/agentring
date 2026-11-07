@@ -38,7 +38,7 @@ from . import __version__
 from .config import ConfigError, home_dir
 from .mcp_server import (PROTOCOL_VERSIONS, AgentringTools, CallSlots, bad_request_id, cancelled_request_id,
                          handle_rpc, initialize_result, is_request, rpc_response)
-from .relay_client import RelayClient
+from .relay_client import InsecureRelayError, RelayClient, check_relay_url
 from .store import Store
 
 log = logging.getLogger("agentring.mcp_http")
@@ -125,6 +125,11 @@ class HttpConfig:
         if not admin_url and not relay_url:
             raise ConfigError("set the relay (--relay-url / AGENTRING_RELAY_URL), or a hub "
                               "(AGENTRING_HUB_ADMIN_URL and its admin token)")
+        for var, url in (("AGENTRING_RELAY_URL", relay_url), ("AGENTRING_HUB_ADMIN_URL", admin_url)):
+            try:
+                check_relay_url(url or "")
+            except InsecureRelayError as e:
+                raise ConfigError(f"{var}: {e}") from None
         origins = cli.get("allowed_origins")
         if origins is None:
             origins = [o for o in (env("AGENTRING_MCP_ALLOWED_ORIGINS") or "").split(",")]
@@ -237,6 +242,11 @@ class KeyResolver:
             raise UpstreamError("bad resolve-key answer")
         if self.cfg.relay_url:  # reach the relay on its internal address, not back through the proxy
             base = f"{self.cfg.relay_url}/t/{tid}"
+        try:
+            check_relay_url(base)
+        except InsecureRelayError:
+            log.error("the hub's base_url is plain http:// on a public host: set AGENTRING_RELAY_URL to its internal address")
+            raise UpstreamError("insecure base_url") from None
         return Tenant(tid, base)
 
     async def _self_hosted(self, api_key: str) -> Tenant:
