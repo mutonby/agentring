@@ -56,15 +56,22 @@ def apply_event(store: Store, event: dict[str, Any]) -> None:
         store.advance_seq(seq)
 
 
-def catch_up(client: RelayClient, store: Store) -> int:
-    """Pulls every event after our cursor. Returns how many were applied."""
-    store.reset_if_relay_changed(client.status()["relay_id"])
+def catch_up(client: RelayClient, store: Store, *, lock: AbstractContextManager | None = None) -> int:
+    """Pulls every event after our cursor. Returns how many were applied. `lock`, if the store
+    is shared between threads, is held around store access and never during a relay request."""
+    guard = lock or nullcontext()
+    relay_id = client.status()["relay_id"]
+    with guard:
+        store.reset_if_relay_changed(relay_id)
+        after = store.last_seq
     n = 0
     while True:
-        page = client.list_events(after_seq=store.last_seq)
-        for ev in page["events"]:
-            apply_event(store, ev)
-            n += 1
+        page = client.list_events(after_seq=after)
+        with guard:
+            for ev in page["events"]:
+                apply_event(store, ev)
+                n += 1
+            after = store.last_seq
         if not page["has_more"]:
             return n
 

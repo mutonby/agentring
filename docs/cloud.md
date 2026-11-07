@@ -117,8 +117,21 @@ deleting the tenant or restarting the relay revokes them.
 - **State:** per tenant, the daemon's usual SQLite mirror (`Store`, synced with the
   REST events API) in `{AGENTRING_MCP_DATA_DIR}/tenants/{tenant_id}.db`; it records
   which replies `get_replies` already returned, shared by all the tenant's sessions.
+  When a tenant is deleted, its mirror goes too: as soon as a request finds the tenant
+  gone, or else at the next hourly sweep (`AGENTRING_MCP_SWEEP_S`, 0 = off), which asks
+  `GET /admin/v1/tenants/{tid}` for each mirror on disk. Only that call's own
+  `404 Tenant not found` deletes anything; a network error, a 5xx or any other 404
+  leaves the mirror and stops the sweep until the next one.
 - **Sessions:** `Mcp-Session-Id` from `initialize`, in memory (a restart means
-  clients re-initialize; the per-tenant state is on disk). `DELETE /mcp` ends one.
+  clients re-initialize; the per-tenant state is on disk). `DELETE /mcp` ends one. A
+  tenant has up to 100: a new one replaces its own oldest idle session, never another
+  tenant's.
+- **Limits**, so that one tenant can't take the server from the others: 32 messages in
+  a batch (`400`); 16 tool calls running at once per tenant
+  (`AGENTRING_MCP_MAX_INFLIGHT`; `429` with `Retry-After`); 512 connections in all
+  (`AGENTRING_MCP_MAX_CONNECTIONS`; `503`) and 32 with a request open per tenant
+  (`AGENTRING_MCP_MAX_TENANT_CONNECTIONS`; `429`); 8 MiB in a response (a JSON-RPC
+  error instead); and a client that stops reading is cut off after 30 s.
 - Install in Claude Code:
   `claude mcp add --transport http agentring https://{domain}/mcp --header "Authorization: Bearer ak_…"`
 

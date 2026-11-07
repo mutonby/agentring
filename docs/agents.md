@@ -105,7 +105,10 @@ How it behaves:
   `wait_s`, get a `text/event-stream` (if the client accepts it) with a keep-alive
   comment every 15 s until the result, so proxies don't cut the request. Raise the
   proxy's read timeout anyway if it is shorter than a call. If the client hangs up,
-  a waiting `get_replies` stops; a phone call goes on until it ends.
+  a waiting `get_replies` stops, with or without a stream; a phone call goes on until it ends.
+- **Limits.** Batches of up to 32 messages; up to 16 tool calls running at once per
+  account (over it, `429` with `Retry-After`; `AGENTRING_MCP_MAX_INFLIGHT` changes
+  it). Connections and response sizes are capped too: see [cloud.md](cloud.md).
 - **Voice.** `call` runs the voice AI on this server, with the provider and key from
   its environment (`AGENTRING_VOICE_PROVIDER`, `GEMINI_API_KEY`, …) as for
   `agentring call --ai`. `agents.yaml` is not used: the server never runs commands

@@ -52,18 +52,35 @@ KEEPALIVE_S = 15.0
 RESOLVE_TTL_S = 300.0
 SESSION_IDLE_S = 24 * 3600.0
 MAX_SESSIONS = 10_000
+MAX_SESSIONS_PER_TENANT = 100
 MAX_OPEN_TENANTS = 256
 IDLE_CONNECTION_S = 75.0
 READ_TIMEOUT_S = 30.0
+MAX_BATCH = 32  # messages in one POST
+MAX_INFLIGHT_PER_TENANT = 16  # tool calls running at once; they share one thread pool with every other tenant
+MAX_CONNECTIONS = 512
+MAX_CONNECTIONS_PER_TENANT = 32  # connections with a request of this tenant open
+DEFAULT_MAX_RESPONSE = 8 * 1024 * 1024
+WRITE_TIMEOUT_S = 30.0  # a client gets this long to take what we wrote, like READ_TIMEOUT_S the other way
+DISCONNECT_POLL_S = 1.0
+SWEEP_S = 3600.0  # how often to look for mirrors of deleted tenants (hub mode)
+SWEEP_PACE_S = 0.05  # between two tenants: checking one makes the hub load it
 
 _UNPARSABLE = object()  # a request body that is not JSON
 # A relay API key, or (hub mode) a short-lived agent token; ≤ 128 chars, like the hub's resolve-key.
 _API_KEY = re.compile(r"^a[kt]_[\x21-\x7e]{1,125}$")
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+# HTTP framing, by the RFC 9110/9112 grammar. Not int() or str.strip(), which also take signs,
+# underscores, "0x" and Unicode: a proxy in front that reads such a value differently would
+# put the end of a request somewhere else than we do.
+_CONTENT_LENGTH = re.compile(r"[0-9]{1,20}")
+_CHUNK_LINE = re.compile(rb"([0-9A-Fa-f]{1,16})(?:[ \t]*;[\t\x20-\x7e\x80-\xff]*)?\r\n")
+_HEADER_CONTROL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
 REASONS = {200: "OK", 202: "Accepted", 204: "No Content", 400: "Bad Request", 401: "Unauthorized",
            403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed", 408: "Request Timeout",
            411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type",
-           431: "Request Header Fields Too Large", 500: "Internal Server Error", 501: "Not Implemented",
+           429: "Too Many Requests", 431: "Request Header Fields Too Large", 500: "Internal Server Error",
+           501: "Not Implemented",
            503: "Service Unavailable"}
 
 
@@ -88,6 +105,12 @@ class HttpConfig:
     keepalive_s: float = KEEPALIVE_S
     resolve_ttl_s: float = RESOLVE_TTL_S
     poll_s: float = 2.0  # get_replies polling
+    max_inflight: int = MAX_INFLIGHT_PER_TENANT
+    max_connections: int = MAX_CONNECTIONS
+    max_tenant_connections: int = MAX_CONNECTIONS_PER_TENANT
+    max_response: int = DEFAULT_MAX_RESPONSE
+    write_timeout_s: float = WRITE_TIMEOUT_S
+    sweep_s: float = SWEEP_S  # 0 = no sweep
 
     @property
     def hub(self) -> bool:
@@ -143,6 +166,11 @@ class HttpConfig:
             max_calls=pick("max_calls", "AGENTRING_MCP_MAX_CALLS", DEFAULT_MAX_CALLS, int),
             max_body=pick("max_body", "AGENTRING_MCP_MAX_BODY", DEFAULT_MAX_BODY, int),
             allowed_origins=tuple(o.strip().rstrip("/") for o in origins if o.strip()),
+            max_inflight=pick("max_inflight", "AGENTRING_MCP_MAX_INFLIGHT", MAX_INFLIGHT_PER_TENANT, int),
+            max_connections=pick("max_connections", "AGENTRING_MCP_MAX_CONNECTIONS", MAX_CONNECTIONS, int),
+            max_tenant_connections=pick("max_tenant_connections", "AGENTRING_MCP_MAX_TENANT_CONNECTIONS",
+                                        MAX_CONNECTIONS_PER_TENANT, int),
+            sweep_s=pick("sweep_s", "AGENTRING_MCP_SWEEP_S", SWEEP_S, float),
         )
         if data_dir is not None:
             cfg.data_dir = Path(data_dir).expanduser()
@@ -166,12 +194,16 @@ class UpstreamError(Exception):
     """The hub admin API or the relay can't answer right now."""
 
 
-def _error_code(r: httpx.Response) -> str | None:
-    """The relay's `{"error": {"code"}}`, if the response carries one."""
+def _error_field(r: httpx.Response, name: str) -> str | None:
+    """A field of the relay's `{"error": {"code", "message"}}`, if the response carries one."""
     try:
-        return str(r.json()["error"]["code"])
+        return str(r.json()["error"][name])
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def _error_code(r: httpx.Response) -> str | None:
+    return _error_field(r, "code")
 
 
 class KeyResolver:
@@ -191,6 +223,26 @@ class KeyResolver:
 
     def forget(self, api_key: str) -> None:
         self._cache.pop(key_hash(api_key), None)
+
+    def forget_tenant(self, tenant_id: str) -> None:
+        for h in [h for h, (t, _) in self._cache.items() if t.tenant_id == tenant_id]:
+            self._cache.pop(h, None)
+
+    async def tenant_gone(self, tenant_id: str) -> bool:
+        """Whether the hub says, for certain, that this tenant no longer exists. Deleting data
+        hangs on this, so only the hub's own answer counts. Any 404 won't do: the admin API hides
+        behind a 404 from proxied requests, and a wrong URL gives one too. UpstreamError for
+        anything that is not an answer about the tenant."""
+        try:
+            r = await self._http.get(f"{self.cfg.admin_url}/admin/v1/tenants/{tenant_id}",
+                                     headers={"authorization": f"Bearer {self.cfg.admin_token}"})
+        except httpx.HTTPError as e:
+            raise UpstreamError(f"hub unreachable: {type(e).__name__}") from None
+        if r.status_code == 404 and _error_field(r, "message") == "Tenant not found":
+            return True
+        if r.status_code in (200, 400):  # 400: not an id of the hub's, so not a tenant it deleted
+            return False
+        raise UpstreamError(f"hub HTTP {r.status_code}")
 
     async def resolve(self, api_key: str) -> Tenant:
         h = key_hash(api_key)
@@ -286,7 +338,7 @@ class TenantPool:
     file under `data_dir/tenants/` that mirrors the tenant's messages and remembers which replies
     get_replies returned. Each API key gets its own relay client, so a request never runs with
     another request's credentials (e.g. the old and new key during a rotation). Idle tenants are
-    closed when more than `max_open` are open; their state stays on disk."""
+    closed when more than `max_open` are open; their state stays on disk until `purge`."""
 
     def __init__(self, data_dir: Path, *, call_slots: CallSlots, poll_s: float = 2.0, max_open: int = MAX_OPEN_TENANTS):
         self.dir = data_dir / "tenants"
@@ -350,6 +402,23 @@ class TenantPool:
         for _, tid in idle[: max(1, len(self._open) - self.max_open + 1)]:
             self._close(self._open.pop(tid))
 
+    def tenant_ids(self) -> list[str]:
+        """Every tenant with state on disk."""
+        names = {p.name.removesuffix("-wal").removesuffix("-shm") for p in self.dir.iterdir()}
+        return sorted(n.removesuffix(".db") for n in names if n.endswith(".db") and _SAFE_ID.match(n.removesuffix(".db")))
+
+    def purge(self, tenant_id: str) -> bool:
+        """Deletes a tenant's state, its store closed first. False, with nothing done, while a
+        request or a worker thread still uses it."""
+        e = self._open.get(tenant_id)
+        if e is not None:
+            if e.active or e.tools.busy:
+                return False
+            self._close(self._open.pop(tenant_id))
+        for suffix in (".db", ".db-wal", ".db-shm"):
+            (self.dir / f"{tenant_id}{suffix}").unlink(missing_ok=True)
+        return True
+
     def _close(self, e: _Open) -> None:
         for c in [*e.retired, *e.clients.values()]:
             c.close()
@@ -392,6 +461,7 @@ class Request:
     version: str
     headers: dict[str, str]
     body: bytes = b""
+    held_by: str | None = None  # the tenant whose connection allowance this request is using
 
     @property
     def keep_alive(self) -> bool:
@@ -435,6 +505,9 @@ class McpHttpServer:
         self.call_slots = CallSlots(cfg.max_calls)
         self.pool = TenantPool(cfg.data_dir, call_slots=self.call_slots, poll_s=cfg.poll_s)
         self.sessions: dict[str, Session] = {}
+        self._tenant_sessions: dict[str, set[str]] = {}
+        self.inflight: dict[str, int] = {}  # tool calls running, by tenant
+        self.tenant_conns: dict[str, int] = {}  # connections with a request open, by tenant
         self._server: asyncio.base_events.Server | None = None
         self._conns: set[asyncio.Task] = set()
         self._background: set[asyncio.Task] = set()
@@ -443,6 +516,10 @@ class McpHttpServer:
     async def start(self) -> tuple[str, int]:
         self._server = await asyncio.start_server(self._connection, self.cfg.host, self.cfg.port,
                                                   limit=MAX_HEADER_BYTES)
+        if self.cfg.hub and self.cfg.sweep_s > 0:
+            sweeper = asyncio.ensure_future(self._sweeper())
+            self._background.add(sweeper)
+            sweeper.add_done_callback(self._background.discard)
         host, port = self._server.sockets[0].getsockname()[:2]
         mode = f"hub {self.cfg.admin_url}" if self.cfg.hub else f"relay {self.cfg.relay_url}"
         log.info("agentring %s MCP over HTTP on http://%s:%d/mcp (%s, max %d calls)",
@@ -466,6 +543,11 @@ class McpHttpServer:
 
     # connections
     async def _connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        if len(self._conns) >= self.cfg.max_connections:
+            log.info("at the connection cap (%d): refusing one", self.cfg.max_connections)
+            writer.write(self._head(503, {"content-length": "0", "retry-after": "5", "connection": "close"}))
+            writer.close()
+            return
         task = asyncio.current_task()
         if task is not None:
             self._conns.add(task)
@@ -488,13 +570,16 @@ class McpHttpServer:
         except Exception:
             log.exception("connection failed")
         finally:
-            if task is not None:
-                self._conns.discard(task)
             writer.close()
             try:
-                await writer.wait_closed()
+                await asyncio.wait_for(writer.wait_closed(), self.cfg.write_timeout_s)
+            except asyncio.TimeoutError:
+                writer.transport.abort()  # close() waits for the buffer to flush, and nobody is reading it
             except (ConnectionError, OSError):
                 pass
+            finally:
+                if task is not None:
+                    self._conns.discard(task)
 
     async def _read_request(self, reader: asyncio.StreamReader, idle_s: float) -> Request | None:
         try:
@@ -519,10 +604,11 @@ class McpHttpServer:
             if not line:
                 continue
             name, sep, value = line.partition(":")
-            if not sep or not name or name != name.strip():
+            if not sep or not name or name != name.strip() or _HEADER_CONTROL.search(value):
                 raise HttpError(400)
             k = name.lower()
-            headers[k] = f"{headers[k]}, {value.strip()}" if k in headers else value.strip()
+            value = value.strip(" \t")
+            headers[k] = f"{headers[k]}, {value}" if k in headers else value
         req = Request(method.upper(), target.split("?", 1)[0], version, headers)
         te = headers.get("transfer-encoding", "").lower()
         if te:
@@ -530,12 +616,9 @@ class McpHttpServer:
                 raise HttpError(400)
             req.body = await asyncio.wait_for(self._read_chunked(reader), READ_TIMEOUT_S)
         elif "content-length" in headers:
-            try:
-                n = int(headers["content-length"])
-            except ValueError:
-                raise HttpError(400) from None
-            if n < 0:
+            if not _CONTENT_LENGTH.fullmatch(headers["content-length"]):
                 raise HttpError(400)
+            n = int(headers["content-length"])
             if n > self.cfg.max_body:
                 raise HttpError(413, f"request body over {self.cfg.max_body} bytes")
             req.body = await asyncio.wait_for(reader.readexactly(n), READ_TIMEOUT_S)
@@ -544,15 +627,20 @@ class McpHttpServer:
         return req
 
     async def _read_chunked(self, reader: asyncio.StreamReader) -> bytes:
+        async def line() -> bytes:
+            try:
+                return await reader.readuntil(b"\r\n")
+            except asyncio.LimitOverrunError:
+                raise HttpError(400) from None
+
         body = bytearray()
         while True:
-            line = await reader.readuntil(b"\r\n")
-            try:
-                size = int(line.split(b";", 1)[0].strip(), 16)
-            except ValueError:
-                raise HttpError(400) from None
+            m = _CHUNK_LINE.fullmatch(await line())
+            if m is None:
+                raise HttpError(400)
+            size = int(m[1], 16)
             if size == 0:
-                while (await reader.readuntil(b"\r\n")) != b"\r\n":
+                while (await line()) != b"\r\n":
                     pass  # trailers
                 return bytes(body)
             if len(body) + size > self.cfg.max_body:
@@ -571,13 +659,26 @@ class McpHttpServer:
     async def _send(self, writer: asyncio.StreamWriter, status: int, body: Any = None,
                     headers: dict[str, str] | None = None, *, keep_alive: bool = True) -> None:
         data = b"" if body is None else json.dumps(body, ensure_ascii=False).encode()
+        if len(data) > self.cfg.max_response:
+            log.warning("a response of %d bytes is over the limit", len(data))
+            status, data = 500, json.dumps(rpc_response(None, error=(-32603, "response too large"))).encode()
         h = {"content-length": str(len(data)), **(headers or {})}
         if data:
             h.setdefault("content-type", "application/json")
         if not keep_alive:
             h["connection"] = "close"
         writer.write(self._head(status, h) + data)
-        await writer.drain()
+        await self._drain(writer)
+
+    async def _drain(self, writer: asyncio.StreamWriter) -> None:
+        """Waits for the client to take what was written, within the write deadline. What it
+        leaves unread stays in memory, so past the deadline the connection is aborted: only
+        abort() drops the buffer, close() would keep it until the client reads."""
+        try:
+            await asyncio.wait_for(writer.drain(), self.cfg.write_timeout_s)
+        except asyncio.TimeoutError:
+            writer.transport.abort()
+            raise
 
     @staticmethod
     def _head(status: int, headers: dict[str, str]) -> bytes:
@@ -611,6 +712,7 @@ class McpHttpServer:
             await self._send(writer, e.status, self._error_body(e), e.headers, keep_alive=req.keep_alive)
             return req.keep_alive
         finally:
+            self._let_go(req)
             if req.path != "/healthz":
                 extra = " ".join(f"{k}={v}" for k, v in info.items())
                 log.info("%s %s %d %.0fms %s", req.method, req.path, status, (time.monotonic() - t0) * 1000, extra)
@@ -640,7 +742,23 @@ class McpHttpServer:
             raise HttpError(503, "cannot check the API key right now; try again", {"retry-after": "5"},
                             rpc=True) from None
         info["tenant"] = tenant.tenant_id
+        held = self.tenant_conns.get(tenant.tenant_id, 0)
+        if held >= self.cfg.max_tenant_connections:
+            raise HttpError(429, "too many open requests for this account", {"retry-after": "5"}, rpc=True)
+        self.tenant_conns[tenant.tenant_id] = held + 1
+        req.held_by = tenant.tenant_id
         return key, tenant
+
+    def _let_go(self, req: Request) -> None:
+        """The other end of `_auth`'s count. By request, not by connection: behind a proxy one
+        connection carries many tenants, and only an open request can pin a buffer or a task."""
+        if req.held_by is not None:
+            n = self.tenant_conns.get(req.held_by, 0) - 1
+            if n > 0:
+                self.tenant_conns[req.held_by] = n
+            else:
+                self.tenant_conns.pop(req.held_by, None)
+            req.held_by = None
 
     def _session(self, req: Request, tenant: Tenant) -> Session | None:
         sid = req.headers.get("mcp-session-id")
@@ -649,22 +767,40 @@ class McpHttpServer:
         s = self.sessions.get(sid)
         now = time.monotonic()
         if s is not None and not s.running and now - s.last_seen > SESSION_IDLE_S:
-            self.sessions.pop(sid, None)
+            self._drop_session(sid)
             s = None
         if s is None or s.tenant_id != tenant.tenant_id:
             raise HttpError(404, "unknown or expired session; initialize again", rpc=True)
         s.last_seen = now
         return s
 
+    def _drop_session(self, sid: str) -> None:
+        s = self.sessions.pop(sid, None)
+        if s is not None:
+            own = self._tenant_sessions.get(s.tenant_id, set())
+            own.discard(sid)
+            if not own:
+                self._tenant_sessions.pop(s.tenant_id, None)
+
     def _new_session(self, tenant: Tenant, version: str) -> Session:
+        """A tenant's new session can only push out that tenant's own idle ones: it is at its
+        cap, or the table is full. The one exception is sessions already expired, of anyone."""
         now = time.monotonic()
         if len(self.sessions) >= MAX_SESSIONS:
-            idle = sorted((s.last_seen, sid) for sid, s in self.sessions.items() if not s.running)
-            stale = [sid for seen, sid in idle if now - seen > SESSION_IDLE_S] or [sid for _, sid in idle[:100]]
-            for sid in stale:
-                self.sessions.pop(sid, None)
+            for sid in [sid for sid, s in self.sessions.items() if not s.running and now - s.last_seen > SESSION_IDLE_S]:
+                self._drop_session(sid)
+        own = self._tenant_sessions.get(tenant.tenant_id, set())
+        excess = max(len(own) + 1 - MAX_SESSIONS_PER_TENANT, len(self.sessions) + 1 - MAX_SESSIONS, 0)
+        if excess:
+            idle = sorted((self.sessions[sid].last_seen, sid) for sid in own if not self.sessions[sid].running)
+            if len(idle) < excess:
+                raise HttpError(429, "too many MCP sessions; end some, or send requests without one",
+                                {"retry-after": "30"}, rpc=True)
+            for _, sid in idle[:excess]:
+                self._drop_session(sid)
         s = Session(secrets.token_urlsafe(32), tenant.tenant_id, version, now)
         self.sessions[s.sid] = s
+        self._tenant_sessions.setdefault(tenant.tenant_id, set()).add(s.sid)
         return s
 
     async def _delete(self, req: Request, writer: asyncio.StreamWriter, info: dict[str, Any]) -> int:
@@ -673,7 +809,7 @@ class McpHttpServer:
             raise HttpError(400, "Mcp-Session-Id header needed")
         s = self._session(req, tenant)
         assert s is not None
-        self.sessions.pop(s.sid, None)
+        self._drop_session(s.sid)
         for t in s.running.values():
             t.cancel()
         await self._send(writer, 204, keep_alive=req.keep_alive)
@@ -701,6 +837,8 @@ class McpHttpServer:
         msgs = body if batch else [body]
         if not msgs or not all(isinstance(m, dict) for m in msgs):
             raise HttpError(400, "invalid JSON-RPC message", rpc=True)
+        if len(msgs) > MAX_BATCH:
+            raise HttpError(400, f"a batch can have {MAX_BATCH} messages at most", rpc=True)
 
         if any(m.get("method") == "initialize" for m in msgs):
             if batch:
@@ -731,20 +869,27 @@ class McpHttpServer:
             return 202, True
         info["rpc"] = ",".join(_describe(m) for m in requests)[:120]
 
+        cost = sum(1 for m in requests if m["method"] == "tools/call")
+        running = self.inflight.get(tenant.tenant_id, 0)
+        if cost and running + cost > self.cfg.max_inflight:
+            raise HttpError(429, f"too many tool calls at once (limit {self.cfg.max_inflight})", {"retry-after": "5"},
+                            rpc=True)
         tools = self.pool.acquire(tenant, key)
+        self.inflight[tenant.tenant_id] = running + cost
         tasks: list[tuple[dict[str, Any], asyncio.Task]] = []
         for m in requests:
             t = asyncio.create_task(handle_rpc(tools, m))
             tasks.append((m, t))
             if session is not None:
                 session.running[m["id"]] = t
-        done_all = asyncio.ensure_future(self._finish(tenant, key, session, tasks))
+        done_all = asyncio.ensure_future(self._finish(tenant, key, session, tasks, cost))
         self._background.add(done_all)
         done_all.add_done_callback(self._background.discard)
 
         stream = "text/event-stream" in req.headers.get("accept", "") and any(_slow(m) for m, _ in tasks)
         if not stream:
-            await asyncio.wait([t for _, t in tasks])
+            if await self._client_left(tasks, reader, writer):
+                return 200, False
             out = [r for r in (_outcome(m, t) for m, t in tasks) if r is not None]
             if not out:  # all cancelled
                 await self._send(writer, 202, keep_alive=req.keep_alive)
@@ -754,8 +899,23 @@ class McpHttpServer:
         await self._stream(writer, reader, tasks)
         return 200, False
 
+    async def _client_left(self, tasks: list[tuple[dict[str, Any], asyncio.Task]], reader: asyncio.StreamReader,
+                           writer: asyncio.StreamWriter) -> bool:
+        """Waits for a plain JSON POST's requests. True if the client hung up first: a waiting
+        get_replies then stops, as it does over SSE. It polls instead of reading, because the
+        bytes of a next pipelined request must stay in the reader."""
+        pending = {t for _, t in tasks}
+        waits = [t for m, t in tasks if _slow(m) and _cancel_on_disconnect(m)]
+        while pending:
+            _, pending = await asyncio.wait(pending, timeout=DISCONNECT_POLL_S if waits else None)
+            if pending and (reader.at_eof() or writer.is_closing()):
+                for t in waits:
+                    t.cancel()
+                return True
+        return False
+
     async def _finish(self, tenant: Tenant, key: str, session: Session | None,
-                      tasks: list[tuple[dict[str, Any], asyncio.Task]]) -> None:
+                      tasks: list[tuple[dict[str, Any], asyncio.Task]], cost: int) -> None:
         """Releases the tenant once every request of a POST is done (even after the client left)."""
         try:
             await asyncio.gather(*(t for _, t in tasks), return_exceptions=True)
@@ -764,8 +924,52 @@ class McpHttpServer:
                 for m, t in tasks:
                     if session.running.get(m["id"]) is t:
                         session.running.pop(m["id"], None)
+            left = self.inflight.get(tenant.tenant_id, 0) - cost
+            if left > 0:
+                self.inflight[tenant.tenant_id] = left
+            else:
+                self.inflight.pop(tenant.tenant_id, None)
             if self.pool.release(tenant.tenant_id, key):
                 self.resolver.forget(key)  # rotated or revoked: the next request gets an HTTP 401
+                try:
+                    await self._reap(tenant.tenant_id)  # or the whole tenant is gone
+                except (UpstreamError, OSError) as e:
+                    log.warning("could not check tenant %s: %s", tenant.tenant_id, e)  # the sweep will
+
+    # deleted tenants
+    async def _reap(self, tenant_id: str) -> bool:
+        """Deletes a tenant's mirror if the hub says the tenant is gone. It holds the user's
+        messages, and the relay's copy is all a tenant deletion removes. An error from the hub
+        propagates and deletes nothing."""
+        if not self.cfg.hub or not await self.resolver.tenant_gone(tenant_id):
+            return False
+        if not self.pool.purge(tenant_id):
+            return False  # still in use: the next sweep gets it
+        for sid in list(self._tenant_sessions.get(tenant_id, ())):
+            self._drop_session(sid)
+        self.resolver.forget_tenant(tenant_id)
+        log.info("tenant %s is gone: its mirror was deleted", tenant_id)
+        return True
+
+    async def _sweep(self) -> None:
+        """Covers deletions no request ever ran into. Stops at the first error from the hub."""
+        for tenant_id in self.pool.tenant_ids():
+            try:
+                await self._reap(tenant_id)
+            except UpstreamError as e:
+                log.warning("mirror sweep stopped: %s", e)
+                return
+            await asyncio.sleep(SWEEP_PACE_S)
+
+    async def _sweeper(self) -> None:
+        delay = min(self.cfg.sweep_s, 60.0)  # soon after a start: deploys may come more often than sweeps
+        while True:
+            await asyncio.sleep(delay)
+            delay = self.cfg.sweep_s
+            try:
+                await self._sweep()
+            except Exception:
+                log.exception("mirror sweep failed")
 
     async def _stream(self, writer: asyncio.StreamWriter, reader: asyncio.StreamReader,
                       tasks: list[tuple[dict[str, Any], asyncio.Task]]) -> None:
@@ -774,8 +978,9 @@ class McpHttpServer:
                                       "x-accel-buffering": "no", "connection": "close"}))
         pending = {t: m for m, t in tasks}
         gone: asyncio.Future = asyncio.ensure_future(reader.read(1))  # b"" when the client hangs up
+        sent = 0
         try:
-            await writer.drain()
+            await self._drain(writer)
             while pending:
                 done, _ = await asyncio.wait({*pending, gone}, timeout=self.cfg.keepalive_s,
                                              return_when=asyncio.FIRST_COMPLETED)
@@ -788,9 +993,14 @@ class McpHttpServer:
                     m = pending.pop(t, None)
                     r = _outcome(m, t) if m is not None else None
                     if r is not None:
-                        chunks.append(f"event: message\ndata: {json.dumps(r, ensure_ascii=False)}\n\n")
-                writer.write(("".join(chunks) or ": keep-alive\n\n").encode())
-                await writer.drain()
+                        data = json.dumps(r, ensure_ascii=False).encode()
+                        if sent + len(data) > self.cfg.max_response:
+                            log.warning("a response of %d bytes is over the limit", sent + len(data))
+                            data = json.dumps(rpc_response(m["id"], error=(-32603, "response too large"))).encode()
+                        sent += len(data)
+                        chunks.append(b"event: message\ndata: " + data + b"\n\n")
+                writer.write(b"".join(chunks) or b": keep-alive\n\n")
+                await self._drain(writer)
         except (ConnectionError, OSError):
             for t, m in pending.items():
                 if _cancel_on_disconnect(m):

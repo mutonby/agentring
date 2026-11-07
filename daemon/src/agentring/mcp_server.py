@@ -180,22 +180,25 @@ class AgentringTools:
         return view
 
     def _new_replies(self, cancelled: threading.Event | None = None) -> list[dict[str, Any]]:
-        with self._busy, self._db:
+        with self._busy:
             return self._take_replies(cancelled)
 
     def _take_replies(self, cancelled: threading.Event | None = None) -> list[dict[str, Any]]:
-        catch_up(self.client, self.store)
-        rows = self.store.replies(since=None, undelivered_only=True, limit=100)
-        if cancelled is not None and cancelled.is_set():
-            return []  # nobody will get them: leave them for the next get_replies
-        if rows:
-            self.store.mark_delivered([r["msg_id"] for r in rows], int(time.time() * 1000))
-            for r in rows:
-                if r["read_at"] is None:
-                    try:
-                        self.client.mark_read(r["msg_id"])
-                    except RelayError:
-                        pass  # the read receipt is cosmetic
+        # _db guards the store only. Held across a relay request, it would park this tenant's
+        # waiting threads in the pool the HTTP server shares with every other tenant.
+        catch_up(self.client, self.store, lock=self._db)
+        with self._db:  # claiming replies is one step: each is returned once
+            rows = self.store.replies(since=None, undelivered_only=True, limit=100)
+            if cancelled is not None and cancelled.is_set():
+                return []  # nobody will get them: leave them for the next get_replies
+            if rows:
+                self.store.mark_delivered([r["msg_id"] for r in rows], int(time.time() * 1000))
+        for r in rows:
+            if r["read_at"] is None:
+                try:
+                    self.client.mark_read(r["msg_id"])
+                except RelayError:
+                    pass  # the read receipt is cosmetic
         return [{"msg_id": r["msg_id"], "text": r["text"], "reply_to": r["reply_to"],
                  "at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["created_at"] / 1000))} for r in rows]
 
