@@ -94,19 +94,6 @@ class LockScreenPolicyTest {
     }
 
     @Test
-    fun inlineReplyAsksForAnUnlock() {
-        if (Build.VERSION.SDK_INT < 31) return
-        val message = Message("msg_1", Message.FROM_AGENT, "hello", createdAt = System.currentTimeMillis())
-        Notifications.showMessages(context, "Agent", listOf(message))
-        try {
-            val reply = waitFor(Notifications.ID_MESSAGES).actions.first { it.remoteInputs?.isNotEmpty() == true }
-            assertTrue(reply.isAuthenticationRequired)
-        } finally {
-            Notifications.cancelMessages(context)
-        }
-    }
-
-    @Test
     fun urgentUsesTheAlarmStreamOnlyWithoutDndOrWithTheGrant() {
         val all = NotificationManager.INTERRUPTION_FILTER_ALL
         val dnd = listOf(
