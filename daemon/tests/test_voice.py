@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import threading
 import time
@@ -163,6 +164,38 @@ def test_mcp_tools(sse):
         srv.shutdown()
     assert out == {"status": "status ok {}", "deploy": 'deploy ok {"app": "web"}', "broken": "Error: boom"}
     assert only == ["status"]
+
+
+def test_a_tool_argument_cannot_pick_another_tool():
+    """`allow` must hold against the model: `_name` is only an argument of the allowed tool."""
+    called: list[str] = []
+
+    class Recording(_Mcp):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            msg = json.loads(body)
+            if msg.get("method") == "tools/call":
+                called.append(msg["params"]["name"])
+            self.rfile = io.BytesIO(body)
+            super().do_POST()
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Recording)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    async def run():
+        tools, client = await mcp_tools(f"http://127.0.0.1:{srv.server_address[1]}/mcp", allow=["status"])
+        try:
+            return [t.name for t in tools], await tools[0].call({"_name": "deploy"})
+        finally:
+            await client.aclose()
+
+    try:
+        names, out = asyncio.run(run())
+    finally:
+        srv.shutdown()
+    assert names == ["status"]
+    assert called == ["status"]  # never deploy
+    assert out == 'status ok {"_name": "deploy"}'
 
 
 # ------------------------------------------------------------------ the call session
