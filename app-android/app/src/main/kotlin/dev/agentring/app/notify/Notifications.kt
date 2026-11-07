@@ -55,8 +55,6 @@ object Notifications {
             .setAllowGeneratedReplies(true)
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
             .setShowsUserInterface(false)
-            // Replying speaks for the user: the system asks for an unlock first (API 31+).
-            .setAuthenticationRequired(true)
             .build()
     }
 
