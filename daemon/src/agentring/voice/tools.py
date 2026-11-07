@@ -158,15 +158,20 @@ async def mcp_tools(
     client = McpClient(url, headers=headers, timeout_s=timeout_s)
     await client.initialize()
     allowed = set(allow) if allow is not None else None
+
+    def _bind(name: str) -> Callable[..., Any]:
+        # The name lives in the closure: every keyword of the handler comes from the model,
+        # so a parameter here would let a tool call pick another tool past the allowlist.
+        async def handler(**args: Any) -> str:
+            return await client.call_tool(name, args)
+
+        return handler
+
     tools = []
     for t in await client.list_tools():
         if allowed is not None and t["name"] not in allowed:
             continue
-
-        async def handler(_name: str = t["name"], **args: Any) -> str:
-            return await client.call_tool(_name, args)
-
-        tools.append(Tool(t["name"], t.get("description", ""), handler,
+        tools.append(Tool(t["name"], t.get("description", ""), _bind(t["name"]),
                           t.get("inputSchema") or {"type": "object", "properties": {}}))
     log.info("MCP %s: %d tools", url, len(tools))
     return tools, client

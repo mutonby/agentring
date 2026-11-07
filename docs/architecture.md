@@ -153,8 +153,8 @@ CI fails if generated code is stale or a fixture doesn't round-trip.
    long-lived HS256 `device_jwt` checked against the device table on every
    request, so revocation is immediate.
 9. **`consult_agent` command backend uses an argv list, not a shell string**
-   (M3): `command: ["claude", "-p", "{task}"]`. The task comes from a voice
-   model and must never be interpolated into a shell.
+   (M3): `command: ["claude", "-p", "--", "{task}"]`. The task comes from a voice
+   model and must never be interpolated into a shell, or read as an option.
 10. **Single hostname** (M2): Caddy routes `/v1/*` to the relay and `/rtc*` to
     LiveKit, so the quickstart needs one DNS record. LiveKit's admin API
     (`/twirp*`) and the relay's LiveKit webhook are internal only (404 from

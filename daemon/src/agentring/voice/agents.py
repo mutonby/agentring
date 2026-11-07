@@ -4,7 +4,7 @@
     agents:
       claude:
         description: Claude Code in my web app's repo (code, CI, deploys).
-        command: [claude, -p, "{task}"]
+        command: [claude, -p, --, "{task}"]
         cwd: ~/code/webapp
     mcp:
       - url: http://127.0.0.1:8787/mcp
@@ -12,7 +12,7 @@
 
 A command agent is run as an argv list, never through a shell: the task comes from a
 voice model and is only ever one argument ("{task}" in `command`, or stdin if no
-argument has it). Agents are slow, so `consult_agent` waits a little and otherwise lets
+argument has it), and it is never read as an option (see `CommandAgent.argv`). Agents are slow, so `consult_agent` waits a little and otherwise lets
 the call go on; the answer is given to the model when it arrives, or sent to the phone
 as a message if the call is already over.
 """
@@ -36,6 +36,7 @@ from .tools import Tool, current_session
 log = logging.getLogger("agentring.voice.agents")
 
 TASK = "{task}"
+TASK_PREFIX = "Task: "  # keeps a task that starts with "-" from being parsed as an option
 _NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -53,10 +54,20 @@ class CommandAgent:
     timeout_s: float = 600
 
     def argv(self, task: str) -> tuple[list[str], bytes | None]:
-        """The argv to run and what to write on stdin (the task, if no argument takes it)."""
-        if any(TASK in a for a in self.command):
-            return [a.replace(TASK, task) for a in self.command], None
-        return list(self.command), task.encode()
+        """The argv to run and what to write on stdin (the task, if no argument takes it).
+
+        The task comes from a voice model, so it must not become an option of the agent's CLI:
+        as a whole argument with no `--` before it, a task starting with "-" gets TASK_PREFIX.
+        After `--`, or inside a longer argument, it is left as it is."""
+        if not any(TASK in a for a in self.command):
+            return list(self.command), task.encode()
+        out: list[str] = []
+        options_ended = False
+        for a in self.command:
+            bare = a == TASK and not options_ended and task.startswith("-")
+            out.append(TASK_PREFIX + task if bare else a.replace(TASK, task))
+            options_ended = options_ended or a == "--"
+        return out, None
 
     async def ask(self, task: str, *, call_id: str | None = None) -> str:
         """Runs the agent once; its stdout is the answer. Raises on failure or timeout."""
@@ -266,9 +277,10 @@ class Consultations:
     async def _deliver(self, session: Any, agent: str, task: str, ok: bool, text: str) -> None:
         if not session.done.is_set():
             fmt = self.prompts.answer if ok else self.prompts.failed
-            session.notify(fmt.format(agent=agent, task=task, answer=text), respond=True)
-        elif ok and session.relay is not None:
-            # The call is over: the answer goes to the phone as a message.
+            session.notify(fmt.format(agent=agent, task=task, answer=text), respond=True, trusted=False)
+        elif ok and session.relay is not None and session.info.device_ids is None:
+            # The call is over: the answer goes to the phone as a message. Not after a targeted
+            # call: messages have no audience, every paired phone would read what it was private from.
             msg = self.prompts.message.format(agent=agent, task=task, answer=text)
             try:
                 await asyncio.to_thread(session.relay.post_message, msg)

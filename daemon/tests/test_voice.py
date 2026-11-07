@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import threading
 import time
@@ -165,6 +166,38 @@ def test_mcp_tools(sse):
     assert only == ["status"]
 
 
+def test_a_tool_argument_cannot_pick_another_tool():
+    """`allow` must hold against the model: `_name` is only an argument of the allowed tool."""
+    called: list[str] = []
+
+    class Recording(_Mcp):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            msg = json.loads(body)
+            if msg.get("method") == "tools/call":
+                called.append(msg["params"]["name"])
+            self.rfile = io.BytesIO(body)
+            super().do_POST()
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Recording)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    async def run():
+        tools, client = await mcp_tools(f"http://127.0.0.1:{srv.server_address[1]}/mcp", allow=["status"])
+        try:
+            return [t.name for t in tools], await tools[0].call({"_name": "deploy"})
+        finally:
+            await client.aclose()
+
+    try:
+        names, out = asyncio.run(run())
+    finally:
+        srv.shutdown()
+    assert names == ["status"]
+    assert called == ["status"]  # never deploy
+    assert out == 'status ok {"_name": "deploy"}'
+
+
 # ------------------------------------------------------------------ the call session
 
 
@@ -322,6 +355,146 @@ def test_consult_agent_through_the_session():
         await c.drain(5)
         return out, s._notes.get_nowait()
 
-    out, (note, respond) = asyncio.run(run())
+    out, (note, respond, trusted) = asyncio.run(run())
     assert "working on it" in out
     assert "ok disk" in note and respond is True
+    assert trusted is False  # the agent's output is not the session's own note
+
+
+def test_notes_loop_passes_provenance_only_to_backends_that_take_it():
+    class Old(_NullBackend):
+        def __init__(self):
+            self.sent = []
+
+        async def send_text(self, text, *, respond):
+            self.sent.append((text, respond))
+
+    class New(Old):
+        async def send_text(self, text, *, respond, trusted=True):
+            self.sent.append((text, respond, trusted))
+
+    async def run(backend):
+        s = CallSession(VoiceAgent(lambda: backend, "x"), CallInfo("call_1", "test"))
+        loop = asyncio.create_task(s._notes_loop())
+        s.notify("mine")
+        s.notify("theirs", respond=True, trusted=False)
+        await asyncio.sleep(0.05)
+        loop.cancel()
+        return backend.sent
+
+    assert asyncio.run(run(Old())) == [("mine", False), ("theirs", True)]
+    assert asyncio.run(run(New())) == [("mine", False, True), ("theirs", True, False)]
+
+
+def test_after_user_speech_gate_holds_tools_until_the_user_speaks():
+    from agentring.voice.quick import NO_USER_YET, after_user_speech
+
+    async def run():
+        ran: list[int] = []
+        tool = Tool("ping", "Ping.", lambda: ran.append(1) or "pong")
+        s = CallSession(VoiceAgent(lambda: _NullBackend(), "x", [tool], before_tool=after_user_speech),
+                        CallInfo("call_1", "test"))
+        before = await s.run_tool(ToolCall("1", "ping", {}))
+        hangs_up = await s.run_tool(ToolCall("2", "end_call", {}))  # hanging up is never held back
+        s.handle_event(Transcript("user", "   "))  # silence is not speech
+        still = await s.run_tool(ToolCall("3", "ping", {}))
+        s.handle_event(Transcript("user", "go ahead"))
+        after = await s.run_tool(ToolCall("4", "ping", {}))
+        return before, hangs_up, still, after, ran, s.tool_log
+
+    before, hangs_up, still, after, ran, log = asyncio.run(run())
+    assert before == still == NO_USER_YET and "Hanging up" in hangs_up
+    assert after == "pong" and ran == [1]
+    assert [t["skipped"] for t in log] == [True, False, True, False]
+
+
+class _FakeBuilt:
+    """What `build_agent` gives `AgentringTools.call`, for a call nobody answers."""
+
+    consultations = None
+
+    def __init__(self, seen: dict):
+        self.seen = seen
+        self.agent = self
+
+    async def run(self, info, join, *, relay=None):
+        from agentring.voice.session import CallResult
+
+        self.seen["info"] = info
+        return CallResult(info.call_id, False, 0, "no_answer")
+
+    async def aclose(self):
+        pass
+
+
+class _FakeClient:
+    relay_url = "http://127.0.0.1:1"
+
+    def __init__(self):
+        self.messages: list[tuple[str, str | None]] = []
+        self.create_args: dict = {}
+
+    def create_call(self, reason, **kw):
+        self.create_args = kw
+        return {"call": {"call_id": "call_1"}, "join": {}}
+
+    def post_message(self, text, *, reply_to=None):
+        self.messages.append((text, reply_to))
+        return {"msg_id": "msg_1"}
+
+
+def _mcp_call(monkeypatch, tmp_path, **kw):
+    """Runs the MCP `call` tool with the voice stack stubbed; returns (result, client, what it was given)."""
+    from agentring.mcp_server import AgentringTools
+    from agentring.store import Store
+    from agentring.voice import providers, quick
+
+    seen: dict = {}
+
+    async def fake_build(choice, **build_kw):
+        seen.update(build_kw)
+        return _FakeBuilt(seen)
+
+    monkeypatch.setattr(quick, "build_agent", fake_build)
+    monkeypatch.setattr(providers, "resolve_voice", lambda: object())
+    client = _FakeClient()
+    tools = AgentringTools(client, Store(tmp_path / "s.db"), agents_file=None, **kw)
+    out = asyncio.run(tools.call("Deploy blocked", context="Need OK for the migration."))
+    tools.store.close()
+    return out, client, seen
+
+
+def test_missed_targeted_call_sends_no_message(monkeypatch, tmp_path):
+    out, client, seen = _mcp_call(monkeypatch, tmp_path, device_ids=["dev_A"])
+    assert client.create_args["device_ids"] == ["dev_A"] and seen["info"].device_ids == ["dev_A"]
+    assert client.messages == [] and out["fallback_msg_id"] is None
+
+
+def test_missed_group_call_still_leaves_a_message(monkeypatch, tmp_path):
+    out, client, seen = _mcp_call(monkeypatch, tmp_path)
+    assert seen["info"].device_ids is None
+    assert client.messages == [("Missed call: Deploy blocked\n\nNeed OK for the migration.", "call_1")]
+    assert out["fallback_msg_id"] == "msg_1"
+
+
+def test_mcp_call_gates_tools_by_default(monkeypatch, tmp_path):
+    from agentring.voice.quick import after_user_speech
+
+    assert _mcp_call(monkeypatch, tmp_path)[2]["before_tool"] is after_user_speech
+
+    def mine(session, call):
+        return None
+
+    assert _mcp_call(monkeypatch, tmp_path, before_tool=mine)[2]["before_tool"] is mine
+
+
+def test_build_agent_passes_before_tool(monkeypatch):
+    from agentring.voice import quick
+
+    def gate(session, call):
+        return None
+
+    choice = type("Choice", (), {"factory": lambda self: _NullBackend})()
+    built = asyncio.run(quick.build_agent(choice, before_tool=gate))
+    assert built.agent.before_tool is gate
+    assert asyncio.run(quick.build_agent(choice)).agent.before_tool is None  # `call --ai`, `serve --ai`: unchanged

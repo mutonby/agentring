@@ -43,7 +43,13 @@ client's MCP tool timeout if it has a short one (Codex: 60 s, opencode: 30 s).
 
 `context` is everything the voice AI knows about the agent's work: put in it what
 to tell you, what to ask and what not to decide. If `~/.agentring/agents.yaml` exists,
-the voice AI on these calls can also consult your agents.
+the voice AI on these calls can also consult your agents, but only once you have spoken
+on the call: `context` may hold text the calling agent read elsewhere, and that alone
+must not start a tool ([voice.md](voice.md#as-a-library)).
+
+With `agentring mcp --device`, the call is private to those phones. If nobody answers,
+or an agent's answer comes after the call, nothing is sent as a message, because a
+message reaches every paired phone: the calling agent still gets the result.
 
 The server is a small JSON-RPC loop with no MCP SDK and no extra dependencies
 (see [architecture](architecture.md#accepted-deviations)). For an MCP URL instead of
@@ -99,7 +105,10 @@ How it behaves:
   `wait_s`, get a `text/event-stream` (if the client accepts it) with a keep-alive
   comment every 15 s until the result, so proxies don't cut the request. Raise the
   proxy's read timeout anyway if it is shorter than a call. If the client hangs up,
-  a waiting `get_replies` stops; a phone call goes on until it ends.
+  a waiting `get_replies` stops, with or without a stream; a phone call goes on until it ends.
+- **Limits.** Batches of up to 32 messages; up to 16 tool calls running at once per
+  account (over it, `429` with `Retry-After`; `AGENTRING_MCP_MAX_INFLIGHT` changes
+  it). Connections and response sizes are capped too: see [cloud.md](cloud.md).
 - **Voice.** `call` runs the voice AI on this server, with the provider and key from
   its environment (`AGENTRING_VOICE_PROVIDER`, `GEMINI_API_KEY`, …) as for
   `agentring call --ai`. `agents.yaml` is not used: the server never runs commands
@@ -151,8 +160,10 @@ mcp:                         # MCP servers over Streamable HTTP; their tools go 
   replaced inside the argument that contains it, and if no argument has it, the
   task goes to stdin. The agent's stdout is the answer. A non-zero exit is an
   error, with the end of stderr.
-- Don't let the task be read as an option: put `--` before `{task}`, or text before
-  it in the same argument (`"Task: {task}"`).
+- The task is never read as an option. As a whole argument with no `--` before it, a
+  task that starts with `-` is passed as `Task: -…`, so `[claude, -p, "{task}"]` is safe.
+  You still choose what the agent sees: put `--` before `{task}`, or text before it in
+  the same argument (`"Task: {task}"`), and it is passed as it is.
 - The agent runs with your environment plus `env` and `AGENTRING_CALL_ID`, in `cwd`.
   The call id lets an agent keep one session per call (see [OpenClaw](#openclaw)).
 - **`description` matters**: the voice AI picks the agent by it.
