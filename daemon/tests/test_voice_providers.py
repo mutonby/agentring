@@ -11,7 +11,7 @@ import websockets
 
 from agentring.voice import GeminiLive
 from agentring.voice.backend import AudioOut, Interrupted, ToolCalls, ToolResult, Transcript, TurnComplete
-from agentring.voice.openai_realtime import GrokVoice, OpenAIRealtime
+from agentring.voice.openai_realtime import GrokVoice, LocalRealtime, OpenAIRealtime
 from agentring.voice.phonic import Phonic, strict_schema
 from agentring.voice.providers import VoiceConfigError, resolve_voice
 from agentring.voice.tools import Tool
@@ -286,6 +286,7 @@ def test_other_backends_take_the_provenance_argument_and_ignore_it():
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTRING_HOME", str(tmp_path))
     for name in ("AGENTRING_VOICE_PROVIDER", "AGENTRING_VOICE_MODEL", "AGENTRING_VOICE_NAME",
+                 "AGENTRING_VOICE_URL", "AGENTRING_VOICE_KEY",
                  "GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "PHONIC_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     return tmp_path
@@ -315,8 +316,70 @@ def test_resolve_voice_errors(home, monkeypatch):
         resolve_voice()
     with pytest.raises(VoiceConfigError, match="PHONIC_API_KEY"):
         resolve_voice("phonic")
-    with pytest.raises(VoiceConfigError, match="gemini, openai, grok, phonic"):
+    with pytest.raises(VoiceConfigError, match="gemini, openai, grok, phonic, local"):
         resolve_voice("siri")
     monkeypatch.setenv("OPENAI_API_KEY", "o")
     c = resolve_voice("openai")
     assert isinstance(c.factory()(), OpenAIRealtime) and (c.model, c.voice) == ("gpt-realtime-2.1", "marin")
+
+
+# ------------------------------------------------------------------ local (OpenAI Realtime compatible)
+
+
+def test_resolve_local_needs_no_key(home, monkeypatch):
+    c = resolve_voice("local")
+    assert (c.provider.name, c.model, c.url) == ("local", "local", "ws://127.0.0.1:8765/v1/realtime")
+    b = c.factory()()
+    assert isinstance(b, LocalRealtime) and b.url == c.url and b.api_key == "local" and b.max_session_s is None
+
+    (home / ".env").write_text("AGENTRING_VOICE_PROVIDER=local\nAGENTRING_VOICE_URL=wss://gpu.lan:9000/v1/realtime\n"
+                               "AGENTRING_VOICE_KEY=s3cret\nAGENTRING_VOICE_MODEL=ministral\n")
+    c = resolve_voice()
+    b = c.factory()()
+    assert (b.url, b.api_key, b.model) == ("wss://gpu.lan:9000/v1/realtime", "s3cret", "ministral")
+
+    monkeypatch.setenv("AGENTRING_VOICE_URL", "http://127.0.0.1:8765")
+    with pytest.raises(VoiceConfigError, match="ws://"):
+        resolve_voice("local")
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    assert resolve_voice("gemini").url is None
+
+
+def test_local_session_has_no_voice_or_transcription():
+    s = LocalRealtime().session_config("Be brief.", [Tool("ping", "Ping.", lambda: "pong")])
+    assert "transcription" not in s["audio"]["input"] and "voice" not in s["audio"]["output"]
+    assert s["model"] == "local" and s["tools"][0]["name"] == "ping"
+    assert s["audio"]["input"]["format"]["rate"] == 24000
+
+
+def test_local_waits_for_a_busy_server():
+    tries = []
+
+    async def handler(ws):
+        tries.append(1)
+        await ws.send(json.dumps({"type": "session.created"}))
+        await ws.recv()
+        if len(tries) < 3:
+            await ws.send(json.dumps({"type": "error", "error": {"type": "session_limit_reached",
+                                                                 "message": "All 1 session slots are in use."}}))
+            await ws.close(1008, "All session slots are in use")
+            return
+        await ws.send(json.dumps({"type": "session.updated"}))
+        await ws.wait_closed()
+
+    async def run():
+        server, url = await _serve(handler)
+        try:
+            b = LocalRealtime(url=url)
+            await b.connect("x", [])
+            await b.close()
+            b = LocalRealtime(url=url)
+            b.busy_wait_s = 0
+            tries.clear()
+            with pytest.raises(RuntimeError, match="session_limit_reached"):
+                await b.connect("x", [])
+        finally:
+            server.close()
+
+    asyncio.run(run())
+    assert len(tries) == 1  # no waiting left: the second one gave up at once

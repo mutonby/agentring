@@ -498,3 +498,18 @@ def test_build_agent_passes_before_tool(monkeypatch):
     built = asyncio.run(quick.build_agent(choice, before_tool=gate))
     assert built.agent.before_tool is gate
     assert asyncio.run(quick.build_agent(choice)).agent.before_tool is None  # `call --ai`, `serve --ai`: unchanged
+
+
+def test_instructions_ask_to_talk_before_tools():
+    from agentring.voice import Prompts
+
+    async def run():
+        text = await _session()._instructions()
+        assert text.startswith("x\n\n") and "let me check" in text and "Never answer from memory" in text
+        agent = VoiceAgent(lambda: _NullBackend(), "x", [])  # no tools: nothing to add
+        assert await CallSession(agent, CallInfo("c", "t"))._instructions() == "x"
+        agent = VoiceAgent(lambda: _NullBackend(), "x", [Tool("add", "Add.", lambda a, b: a + b)],
+                           prompts=Prompts(before_tools=""))
+        assert await CallSession(agent, CallInfo("c", "t"))._instructions() == "x"
+
+    asyncio.run(run())

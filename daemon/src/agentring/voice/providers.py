@@ -8,6 +8,11 @@ agree: AGENTRING_VOICE_PROVIDER, AGENTRING_VOICE_MODEL, AGENTRING_VOICE_NAME, th
 provider's own key (GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY, PHONIC_API_KEY) and
 AGENTRING_VOICE_LANGUAGE (e.g. "es": Phonic speaks it before it hears anyone; OpenAI
 and Grok use it to transcribe the user; Gemini follows the instructions).
+
+`local` is any OpenAI-Realtime-compatible server you run yourself (e.g. Hugging Face
+speech-to-speech in front of a small model on llama.cpp): AGENTRING_VOICE_URL says where
+(default ws://127.0.0.1:8765/v1/realtime), and AGENTRING_VOICE_KEY is only needed if the
+server asks for one. The model is whatever that server runs; agentring doesn't pick it.
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ class Provider:
     default_model: str
     default_voice: str | None  # None: the provider's own default
     takes_language: bool = True
+    key_required: bool = True
+    default_url: str | None = None  # only for `local`: where its server listens
 
     def backend_class(self) -> Any:
         if self.name == "gemini":
@@ -40,6 +47,9 @@ class Provider:
         if self.name == "grok":
             from .openai_realtime import GrokVoice
             return GrokVoice
+        if self.name == "local":
+            from .openai_realtime import LocalRealtime
+            return LocalRealtime
         from .phonic import Phonic
         return Phonic
 
@@ -49,6 +59,8 @@ PROVIDERS = {p.name: p for p in (
     Provider("openai", "OpenAI Realtime", "OPENAI_API_KEY", "gpt-realtime-2.1", "marin"),
     Provider("grok", "Grok Voice", "XAI_API_KEY", "grok-voice-latest", None),
     Provider("phonic", "Phonic", "PHONIC_API_KEY", "phonic-1", None),
+    Provider("local", "Local (OpenAI Realtime compatible)", "AGENTRING_VOICE_KEY", "local", None,
+             takes_language=False, key_required=False, default_url="ws://127.0.0.1:8765/v1/realtime"),
 )}
 
 
@@ -63,11 +75,14 @@ class VoiceChoice:
     model: str
     voice: str | None
     language: str | None = None
+    url: str | None = None  # `local` only
 
     def factory(self) -> Callable[[], Any]:
         """A new backend per call (what VoiceAgent takes)."""
         cls = self.provider.backend_class()
         kw: dict[str, Any] = {"model": self.model}
+        if self.url:
+            kw["url"] = self.url
         if self.voice:
             kw["voice"] = self.voice
         if self.language and self.provider.takes_language:
@@ -85,9 +100,12 @@ def resolve_voice(provider: str | None = None, model: str | None = None, voice: 
     if p is None:
         raise VoiceConfigError(f"unknown voice provider {name!r}: use one of {', '.join(PROVIDERS)}")
     key = secret(p.key_env)
-    if not key:
+    if not key and p.key_required:
         raise VoiceConfigError(f"{p.label} needs {p.key_env} (environment or ~/.agentring/.env)")
+    url = (secret("AGENTRING_VOICE_URL") or p.default_url) if p.default_url else None
+    if url and not url.startswith(("ws://", "wss://")):
+        raise VoiceConfigError(f"AGENTRING_VOICE_URL must start with ws:// or wss://, not {url!r}")
     own = name == configured
-    return VoiceChoice(p, key, model or (own and secret("AGENTRING_VOICE_MODEL")) or p.default_model,
+    return VoiceChoice(p, key or "", model or (own and secret("AGENTRING_VOICE_MODEL")) or p.default_model,
                        voice or (own and secret("AGENTRING_VOICE_NAME")) or p.default_voice,
-                       secret("AGENTRING_VOICE_LANGUAGE"))
+                       secret("AGENTRING_VOICE_LANGUAGE"), url)

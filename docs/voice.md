@@ -7,7 +7,8 @@ the agent ("Call agent" in the app).
 
 Install the voice extra and give it the key of a voice provider (environment or
 `~/.agentring/.env`). Gemini Live is the default (it has a free tier); OpenAI Realtime,
-Grok Voice and Phonic work the same way ([providers](#providers)):
+Grok Voice and Phonic work the same way, and `local` uses a voice server on your own
+machine with no key ([providers](#providers), [local](#local-voice-experimental)):
 
 ```bash
 uv tool install './daemon[voice]'
@@ -31,7 +32,7 @@ agentring serve --ai --instructions @prompt.md --mcp http://127.0.0.1:8787/mcp
 - `--instructions`: the system prompt (inline or `@file`). Default: a short, generic phone persona.
 - `--mcp`: any MCP server over Streamable HTTP; repeat for several. `--tools` keeps only
   the listed tools: over the phone, expose only what the caller should be able to do.
-- `--provider`: `gemini` (default), `openai`, `grok` or `phonic`. Default: `AGENTRING_VOICE_PROVIDER`.
+- `--provider`: `gemini` (default), `openai`, `grok`, `phonic` or `local`. Default: `AGENTRING_VOICE_PROVIDER`.
 - `--model` / `--voice`: the provider's model and voice (defaults in [providers](#providers));
   `AGENTRING_VOICE_MODEL` / `AGENTRING_VOICE_NAME` set them for the configured provider.
 - `--agents`: an [`agents.yaml`](agents.md#agentsyaml) with your agents (the AI consults them with
@@ -68,7 +69,7 @@ What you can plug in:
 |---|---|
 | `tools` | `Tool(name, description, handler, parameters)`; sync handlers run in a thread, async ones in the loop. `mcp_tools(url, allow=[…])` turns an MCP server into tools; `Consultations(load_agents(path).agents).tool()` is `consult_agent` ([agents.md](agents.md)). A tool can find its call with `current_session()` and answer later with `session.notify(text, respond=True)`; pass `trusted=False` if that text is another program's output (see below). |
 | `instructions` | Text, or a function of `CallInfo` (e.g. to add fresh context when the call starts). |
-| `prompts` | `Prompts(...)`: the notes the session gives the model when someone answers, joins or leaves, and the `end_call` description. Change them to change wording or language. |
+| `prompts` | `Prompts(...)`: the notes the session gives the model when someone answers, joins or leaves, the `end_call` description, and `before_tools`, the line added to the instructions when there are tools ("say a few words before you call a tool, never answer from memory what a tool should tell you"; `""` leaves the instructions alone). Change them to change wording or language. |
 | `name_of` | LiveKit identity (`device_<id>`) → the person's name, so the model greets them by name. |
 | `before_tool` | `(session, call) → None \| dict \| str`: run, run with other args, or skip with that answer. The session exposes `transcript`, `partial`, `participants` and `last_user_speech_at` (e.g. "only act if the user asked in the last 45 s"). `build_agent(..., before_tool=…)` takes it too. |
 | `end_call_tool`, `tool_timeout_s`, `ring_timeout_s`, `max_duration_s`, `empty_room_grace_s` | Limits. A tool slower than its timeout keeps running; the model is told so. |
@@ -105,6 +106,7 @@ connection), the relay says it is over, or the model's session limit is near
 | `openai` | OpenAI Realtime (`gpt-realtime-2.1`) | `marin` | `OPENAI_API_KEY` | `OpenAIRealtime` (voice/openai_realtime.py) |
 | `grok` | xAI Grok Voice (`grok-voice-latest`) | xAI's default | `XAI_API_KEY` | `GrokVoice` (voice/openai_realtime.py) |
 | `phonic` | Phonic (`phonic-1`) | Phonic's default | `PHONIC_API_KEY` | `Phonic` (voice/phonic.py) |
+| `local` | whatever your server runs | your server's | none (`AGENTRING_VOICE_KEY` if it asks for one) | `LocalRealtime` (voice/openai_realtime.py) |
 
 The CLI (`call --ai`, `serve --ai`) and the MCP `call` tool resolve the provider the
 same way: `--provider`/`--model`/`--voice` if given, else `AGENTRING_VOICE_PROVIDER`,
@@ -127,12 +129,85 @@ picked and chained the expected tools:
 
 Phonic and Grok say "let me check" before a tool and then answer; Gemini stays quiet
 until the tool returns. Phonic talks the longest, Grok is the most concise. OpenAI
-Realtime was not part of that run.
+Realtime was not part of that run. Write-up with charts: https://agentring.io/blog/realtime-voice-models.
+
+To compare providers yourself, on your machine and with your network, run the same test:
+
+```bash
+agentring voice bench --provider grok --lang es      # or gemini, openai, phonic, local
+agentring voice bench --provider local --runs 5 --out ./bench-local   # keeps each session's audio
+```
+
+It speaks the four prompts with the system's text-to-speech (`say` on macOS, `espeak-ng`
+elsewhere; `--prompts DIR` takes your own `chat.wav`, `time.wav`, `chain.wav`, `consult.wav`),
+streams them in real time with the same demo tools, and prints per prompt the median time to
+the first word, how often the right tools were called and how often the model spoke before a
+tool answered. It uses the provider's real API: about 12 short sessions with `--runs 3`. `--instructions`
+swaps the system prompt, e.g. to A/B a change.
+
+What that showed for the `before_tools` line (2026-11-05, `--lang es --runs 3`, macOS voice):
+
+| | First word, slow tool | Spoke before a tool answered | Right tools |
+|---|---|---|---|
+| Gemini 3.8 Live, without the line | 5.13 s | 0/9 | 10/12 |
+| Gemini 3.8 Live, with it | **1.45 s** | **9/9** | 11/12 |
+| Grok Voice, with it (it already talked before tools) | 1.17 s | 9/9 | 12/12 |
+| Local, Ministral 3 3B, without | 5.55 s | 0/9 | 10/12 |
+| Local, Ministral 3 3B, with it | 2.46 s | 2/9 | 10/12 |
+
+Gemini stopped going quiet while a tool works; the small local model only sometimes follows it.
 
 Pricing: Gemini Live has a free tier (rate-limited; Google may use free-tier data to
 improve its products) and a paid tier of about $0.005/min of audio in and $0.018/min out
 (https://ai.google.dev/gemini-api/docs/pricing). Phonic starts at $0.07/min
 (https://phonic.ai). OpenAI and xAI bill per use; see their pricing pages.
+
+## Local voice (experimental)
+
+`--provider local` talks to an OpenAI-Realtime-compatible server you run yourself: no key,
+no per-minute bill, and the call audio stays on your machine. agentring doesn't ship or pick
+a model; it connects to `AGENTRING_VOICE_URL` (default `ws://127.0.0.1:8765/v1/realtime`) and
+the server decides who listens, thinks and speaks. Use `wss://` (or a private network such as
+Tailscale) if the server is on another machine: the URL carries the call audio.
+
+What worked best in our tests on an M1 Pro (32 GB) is [Hugging Face
+speech-to-speech](https://github.com/huggingface/speech-to-speech) 1.0.0 (Parakeet for
+speech-to-text, Qwen3-TTS for the voice) with the language model served by llama.cpp:
+
+```bash
+# 1. The language model: Ministral 3 3B, 4-bit (about 2 GB), on llama.cpp
+brew install llama.cpp   # or a release from github.com/ggml-org/llama.cpp
+curl -LO https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/main/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf
+llama-server -m Ministral-3-3B-Instruct-2512-Q4_K_M.gguf --jinja -ngl 99 -c 16384 --port 8082
+
+# 2. The voice server in front of it (another terminal; downloads ~2.5 GB of models the first time)
+uv venv -p 3.12 s2s && uv pip install -p s2s/bin/python speech-to-speech==1.0.0
+s2s/bin/speech-to-speech serve --mac-optimal-settings --llm_backend chat-completions \
+  --responses_api_base_url http://127.0.0.1:8082/v1 --responses_api_api_key none --model_name ministral \
+  --parakeet_tdt_language es --qwen3_tts_language Spanish --port 8765   # or en / English
+
+# 3. agentring
+agentring voice bench --provider local --lang es   # check it before a real call
+agentring call "Testing the local voice" --ai --provider local
+```
+
+Any model `llama-server` can run works: change the `.gguf`. What we measured
+(write-up: https://agentring.io/blog/local-voice-models):
+
+| Language model (4-bit, llama-server) | Tool prompts right, text only (12) | Full voice chain on the M1 Pro: chat / quick tool | Notes |
+|---|---|---|---|
+| **Ministral 3 3B** | 12/12 | 2.42 s / 1.76 s | 7/9 right tools by voice; went quiet during a 3 s tool |
+| Qwen3-4B-Instruct-2507 | 12/12 | 2.39 s / 1.65 s | 7/9; twice answered without calling the slow tool |
+| Qwen3.5 2B | 12/12 | not measured | |
+| Qwen3.5 4B | 8/12 | not measured | |
+| LFM2.5 1.2B | 6/12 | not measured | |
+| Gemma 4 E4B (hears the audio itself, no speech-to-text) | not run this way | 1.28 s / 1.31 s | 0/9 right tools by voice: it only uses tools when it thinks, and thinking takes 2–9 s |
+
+For comparison, Grok Voice answered in about 1.3 s with 9/9 right tools. Known rough edges:
+the speech-to-text mishears now and then, the language model and the voice share the Mac's
+GPU (first audio 0.3–2 s depending on load), and the server takes one call at a time (6–7 GB of
+memory). HF speech-to-speech's own Mac default runs the model on MLX, which was 3–4 times
+slower in our test than the same model on llama.cpp.
 
 ## Backends
 
@@ -152,7 +227,8 @@ Each provider above is one class, spoken to over its WebSocket API with `websock
   all the time, silence included, so only what it sends while the assistant speaks
   reaches the call.
 
-A local OpenAI-Realtime-compatible server can use `OpenAIRealtime(key, url="ws://…")`.
+A local OpenAI-Realtime-compatible server is `LocalRealtime(url="ws://…")` (what `--provider local`
+uses): the same protocol, no key, no voice or transcription model of its own.
 
 ## Testing
 
