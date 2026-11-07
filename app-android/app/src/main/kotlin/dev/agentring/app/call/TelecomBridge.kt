@@ -50,9 +50,13 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
     private val _muted = MutableStateFlow(false)
     val systemMuted: StateFlow<Boolean> = _muted
 
-    /** Adds an incoming call. Returns false (quickly) if Telecom can't take it. */
-    suspend fun addIncoming(displayName: String, callId: String, listener: Listener): Boolean =
-        add(displayName, callId, listener, CallAttributesCompat.DIRECTION_INCOMING)
+    /**
+     * Adds an incoming call. Returns false (quickly) if Telecom can't take it, or if
+     * [wanted] says the call ended while Telecom was adding it: then it is disconnected
+     * here, because a call left behind in Telecom blocks every later one.
+     */
+    suspend fun addIncoming(displayName: String, callId: String, listener: Listener, wanted: () -> Boolean): Boolean =
+        add(displayName, callId, listener, CallAttributesCompat.DIRECTION_INCOMING, wanted)
 
     /**
      * Adds a call this phone joins without ringing ("join the call" on a group call
@@ -62,7 +66,13 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
     suspend fun addOutgoing(displayName: String, callId: String, listener: Listener): Boolean =
         add(displayName, callId, listener, CallAttributesCompat.DIRECTION_OUTGOING)
 
-    private suspend fun add(displayName: String, callId: String, listener: Listener, direction: Int): Boolean {
+    private suspend fun add(
+        displayName: String,
+        callId: String,
+        listener: Listener,
+        direction: Int,
+        wanted: () -> Boolean = { true },
+    ): Boolean {
         val ready = CompletableDeferred<Boolean>()
         commands = Channel(Channel.UNLIMITED)
         val cmds = commands
@@ -120,6 +130,11 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
         if (ok == null) {
             Log.w(TAG, "Telecom addCall timed out")
             job?.cancel()
+        }
+        if (ok == true && !wanted()) {
+            // This call's own channel: a newer call may already have replaced `commands`.
+            cmds.trySend(Command.Disconnect(DisconnectCause.MISSED))
+            return false
         }
         return ok == true
     }

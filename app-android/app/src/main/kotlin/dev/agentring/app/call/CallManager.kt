@@ -179,9 +179,12 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
                 if (call?.isJoinable == true) offerJoin(call) else CallNotifications.showMissed(context, info)
             }
         }
-        telecomActive = Graph.settings.useTelecom && telecom.addIncoming(info.agentName, info.callId, this)
+        val onCall = { _state.value.let { it != null && it !is CallUi.Ended && it.info.callId == info.callId } }
+        telecomActive = Graph.settings.useTelecom && telecom.addIncoming(info.agentName, info.callId, this, onCall)
         Log.i(TAG, "telecom: $telecomActive")
-        if (!isCurrent(info.callId)) return
+        if (!onCall()) return
+        // Answered while Telecom was adding the call: `answer` couldn't tell it then.
+        if (telecomActive && _state.value !is CallUi.Incoming) telecom.answer()
         // Build the WebRTC stack and warm the connection while the user decides.
         val s = VoiceSession(context, scope, telecomRoutesAudio = telecomActive)
         session = s
