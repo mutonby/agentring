@@ -173,7 +173,12 @@ AGENTRING_INSECURE_DEV=1 AGENTRING_PUBLIC_URL=http://192.168.1.20:8080 npm start
 ```
 
 This covers messages only. Calls also need a LiveKit server (`LIVEKIT_URL`,
-`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`); option B sets that up for you.
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) running with `room.auto_create: false`;
+option B sets that up for you.
+
+The relay reads the client address from `X-Forwarded-For`, trusting one reverse proxy.
+Set `AGENTRING_TRUSTED_PROXIES` to the number of proxies in front of it, or `0` if
+clients reach it directly.
 
 ## Behind an existing reverse proxy (with calls)
 

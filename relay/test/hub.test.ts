@@ -326,4 +326,83 @@ describe("hub mode", () => {
     const c = await http("GET", `/t/${a.tid}/v1/calls/${call.json.call.call_id}`, a.auth);
     expect(c.json.state).toBe("ringing");
   });
+
+  it("a short-lived agent token can't pair phones or revoke them, and a rotated key takes pending pairing tokens with it", async () => {
+    const a = await createTenant();
+    const { agent_token } = (await app.inject({ method: "POST", url: `/admin/v1/tenants/${a.tid}/agent-tokens`, headers: ADMIN, payload: { ttl_s: 60 } })).json() as { agent_token: string };
+    const tok = { authorization: `Bearer ${agent_token}` };
+    const fetchTenant = (method: string, path: string, headers: Record<string, string>, body?: object) =>
+      fetch(`${url}/t/${a.tid}${path}`, { method, headers: { ...headers, ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+
+    expect((await fetchTenant("POST", "/v1/pairing-tokens", tok)).status).toBe(403);
+    expect((await fetchTenant("DELETE", "/v1/devices/dev_x", tok)).status).toBe(403);
+    expect((await fetchTenant("GET", "/v1/devices", tok)).status).toBe(200);
+
+    const pending = (await (await fetchTenant("POST", "/v1/pairing-tokens", a.auth)).json()) as { pairing_token: string };
+    await app.inject({ method: "POST", url: `/admin/v1/tenants/${a.tid}/api-key`, headers: ADMIN });
+    const r = await fetchTenant("POST", "/v1/pair", {}, { pairing_token: pending.pairing_token, device_name: "x", platform: "android" });
+    expect(r.status).toBe(401);
+  });
+
+  it("closes an agent socket when its short-lived token expires", async () => {
+    const a = await createTenant();
+    const { agent_token } = hub.issueAgentToken(a.tid, 1);
+    const ws = new WebSocket(`${url.replace("http", "ws")}/t/${a.tid}/v1/ws`, { headers: { authorization: `Bearer ${agent_token}` } });
+    const code = await new Promise<number>((resolve, reject) => {
+      ws.once("close", resolve);
+      ws.once("error", reject);
+    });
+    expect(code).toBe(4401);
+  });
+
+  it("disabling or deleting a tenant ends its open call and closes the room", async () => {
+    for (const end of ["disable", "delete"] as const) {
+      const a = await createTenant();
+      await pair(a.tid);
+      const created = await fetch(`${url}/t/${a.tid}/v1/calls`, {
+        method: "POST",
+        headers: { ...a.auth, "content-type": "application/json" },
+        body: JSON.stringify({ reason: "x" }),
+      });
+      const { call } = (await created.json()) as { call: { call_id: string } };
+      const room = `${a.tid}.${call.call_id}`;
+      if (end === "disable") {
+        await app.inject({ method: "PATCH", url: `/admin/v1/tenants/${a.tid}`, headers: ADMIN, payload: { disabled: true } });
+      } else {
+        await app.inject({ method: "DELETE", url: `/admin/v1/tenants/${a.tid}`, headers: ADMIN });
+      }
+      await new Promise((r) => setImmediate(r));
+      expect(livekit.deleted).toContain(room);
+    }
+  });
+
+  it("limits unanswered calls on a metered plan", async () => {
+    const a = await createTenant({ call_seconds_per_month: 600 });
+    await pair(a.tid);
+    const place = () =>
+      fetch(`${url}/t/${a.tid}/v1/calls`, { method: "POST", headers: { ...a.auth, "content-type": "application/json" }, body: JSON.stringify({ reason: "x" }) });
+    for (let i = 0; i < 20; i++) {
+      const r = await place();
+      expect(r.status).toBe(201);
+      const { call } = (await r.json()) as { call: { call_id: string } };
+      await fetch(`${url}/t/${a.tid}/v1/calls/${call.call_id}/end`, { method: "POST", headers: a.auth });
+    }
+    const over = await place();
+    expect(over.status).toBe(429);
+    expect(((await over.json()) as { error: { code: string } }).error.code).toBe("rate_limited");
+  });
+
+  it("survives a client resetting a rejected websocket upgrade", async () => {
+    const { connect } = await import("node:net");
+    const port = Number(new URL(url).port);
+    await new Promise<void>((resolve) => {
+      const s = connect(port, "127.0.0.1", () => {
+        s.write("GET /v1/ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+        s.resetAndDestroy();
+        resolve();
+      });
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await fetch(`${url}/healthz`)).status).toBe(200);
+  });
 });

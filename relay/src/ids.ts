@@ -3,6 +3,9 @@ import { randomBytes } from "node:crypto";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const RANDOM_MAX = (1n << 80n) - 1n;
 
+/** Replaces lone surrogates, which are not valid text and break strict JSON and UTF-8 consumers. */
+export const wellFormed = (s: string): string => s.replace(/\p{Cs}/gu, "\uFFFD");
+
 let lastTime = -1;
 let lastRandom = 0n;
 

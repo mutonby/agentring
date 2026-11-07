@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import { sha256 } from "../auth.js";
-import { type Ctx, principal, requireAuth } from "../context.js";
+import { type Ctx, principal, requireAgentKey, requireAuth } from "../context.js";
 import { ApiError, notFound } from "../errors.js";
 import { newId, randomToken } from "../ids.js";
 import type { Device, Schemas } from "../protocol.js";
@@ -9,6 +9,8 @@ import { checkPair } from "../quota.js";
 
 const PAIR_WINDOW_MS = 60_000;
 const PAIR_MAX_ATTEMPTS = 10;
+/** Addresses the limiter remembers at most; the oldest go first. */
+const PAIR_MAX_KEYS = 10_000;
 
 interface DeviceRow {
   device_id: string;
@@ -65,6 +67,7 @@ export function revokeDevice(ctx: Ctx, deviceId: string): void {
     .prepare("UPDATE devices SET revoked_at = COALESCE(revoked_at, ?), fcm_token = NULL WHERE device_id = ?")
     .run(Date.now(), deviceId);
   ctx.hub.disconnectDevice(deviceId);
+  ctx.calls?.deviceRevoked(deviceId);
 }
 
 export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -74,7 +77,7 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post<{ Body: { ttl_s?: number } | undefined }>(
     "/v1/pairing-tokens",
     {
-      preHandler: requireAuth(ctx, "agent"),
+      preHandler: requireAgentKey(ctx),
       schema: {
         body: {
           type: ["object", "null"],
@@ -109,7 +112,13 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
       const recent = (attempts.get(req.ip) ?? []).filter((t) => t > now - PAIR_WINDOW_MS);
       if (recent.length >= PAIR_MAX_ATTEMPTS) throw new ApiError(429, "rate_limited", "Too many pairing attempts");
       recent.push(now);
+      attempts.delete(req.ip); // re-inserted last, so the Map stays ordered by last attempt
       attempts.set(req.ip, recent);
+      if (attempts.size > PAIR_MAX_KEYS) {
+        for (const [ip, times] of attempts) {
+          if (attempts.size > PAIR_MAX_KEYS || times.at(-1)! <= now - PAIR_WINDOW_MS) attempts.delete(ip);
+        }
+      }
 
       const b = req.body;
       checkPair(db, ctx.limits());
@@ -171,7 +180,7 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.delete<{ Params: { device_id: string } }>(
     "/v1/devices/:device_id",
-    { preHandler: requireAuth(ctx, "agent") },
+    { preHandler: requireAgentKey(ctx) },
     async (req, reply) => {
       revokeDevice(ctx, req.params.device_id);
       req.log.info({ device: req.params.device_id }, "device revoked");

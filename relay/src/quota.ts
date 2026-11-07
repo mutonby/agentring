@@ -1,5 +1,5 @@
 import type { Db } from "./db/database.js";
-import { quotaExceeded } from "./errors.js";
+import { ApiError, quotaExceeded } from "./errors.js";
 
 /**
  * Per-tenant limits (hub mode, docs/cloud.md). `null` = unlimited. A self-hosted
@@ -83,6 +83,19 @@ export function checkMessage(db: Db, limits: Limits): void {
 export function callMsLeft(db: Db, limits: Limits): number | undefined {
   if (limits.call_seconds_per_month === null) return undefined;
   return Math.max(0, limits.call_seconds_per_month * 1000 - callMsThisMonth(db));
+}
+
+/**
+ * Unanswered calls per hour on a plan with a call-time limit. Only answered time counts
+ * against that limit, so without this a tenant could ring and cancel for free, and hold
+ * shared voice slots while ringing. A self-hosted relay has no limit.
+ */
+export const UNANSWERED_CALLS_PER_HOUR = 20;
+
+export function checkCallRate(db: Db, limits: Limits, now = Date.now()): void {
+  if (limits.call_seconds_per_month === null) return;
+  const n = count(db, "SELECT COUNT(*) AS n FROM calls WHERE created_at >= ? AND answered_at IS NULL", now - 3_600_000);
+  if (n >= UNANSWERED_CALLS_PER_HOUR) throw new ApiError(429, "rate_limited", "Too many unanswered calls; try again later");
 }
 
 export function checkCall(db: Db, limits: Limits): void {
