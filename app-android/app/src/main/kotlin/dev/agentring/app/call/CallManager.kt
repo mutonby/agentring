@@ -188,9 +188,14 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
         prefs.getString(KEY_LAST_LIVEKIT_URL, null)?.let { s.prepare(it) }
     }
 
-    fun answer() {
+    /** Answers [callId] if it is the call ringing now; a stale action for an earlier call does nothing. */
+    fun answer(callId: String) {
         val cur = _state.value as? CallUi.Incoming ?: return
         val info = cur.info
+        if (info.callId != callId) {
+            Log.w(TAG, "ignoring answer for $callId: ${info.callId} is ringing")
+            return
+        }
         ringer.stop()
         timeoutJob?.cancel()
         _state.value = CallUi.Connecting(info)
@@ -231,7 +236,7 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
     fun join(info: CallInfo) {
         val cur = _state.value
         if (cur != null && cur !is CallUi.Ended) {
-            if (cur is CallUi.Incoming && cur.info.callId == info.callId) answer()
+            if (cur is CallUi.Incoming) answer(info.callId)
             return
         }
         synchronized(seen) { seen.add(info.callId) } // a replayed invite must not ring now
@@ -559,9 +564,9 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
 
     // ---------------------------------------------------------------- Telecom callbacks
 
-    override fun onSystemAnswer() {
+    override fun onSystemAnswer(callId: String) {
         scope.launch {
-            answer()
+            answer(callId)
             // Answered from a headset/watch: bring up the call screen if Android lets us.
             runCatching {
                 context.startActivity(Intent(context, CallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

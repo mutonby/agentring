@@ -32,7 +32,6 @@ object CallNotifications {
         fun silent(id: String, nameRes: Int, importance: Int) = NotificationChannel(id, context.getString(nameRes), importance).apply {
             setSound(null, null)
             enableVibration(false)
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
         nm.createNotificationChannel(silent(CHANNEL_CALLS, R.string.channel_calls, NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(
@@ -67,17 +66,26 @@ object CallNotifications {
 
     fun incoming(context: Context, info: CallInfo): Notification {
         // Answer opens the activity directly (no trampoline): that also gives us microphone access.
-        val answer = activityIntent(context, CallActivity.ACTION_ANSWER, 1)
+        val answer = PendingIntent.getActivity(
+            context,
+            1,
+            CallActivity.answerIntent(context, info.callId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val decline = receiverIntent(context, CallActionReceiver.ACTION_DECLINE, 2)
         val fullScreen = activityIntent(context, null, 3)
-        return NotificationCompat.Builder(context, if (info.urgent) CHANNEL_CALLS_URGENT else CHANNEL_CALLS)
+        val channel = if (info.urgent) CHANNEL_CALLS_URGENT else CHANNEL_CALLS
+        fun base() = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(info.agentName)
-            .setContentText(info.reason.ifBlank { context.getString(R.string.call_incoming) })
             .setStyle(NotificationCompat.CallStyle.forIncomingCall(person(info), decline, answer))
             .setCategory(NotificationCompat.CATEGORY_CALL)
+        return base()
+            .setContentText(info.reason.ifBlank { context.getString(R.string.call_incoming) })
             .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            // The reason may be private: the lock screen follows the user's "sensitive content" setting.
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(base().setContentText(context.getString(R.string.call_incoming)).build())
             .setOngoing(true)
             .setFullScreenIntent(fullScreen, true)
             .setContentIntent(fullScreen)
@@ -139,19 +147,22 @@ object CallNotifications {
             Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val b = NotificationCompat.Builder(context, CHANNEL_IN_PROGRESS)
+        fun base() = NotificationCompat.Builder(context, CHANNEL_IN_PROGRESS)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.call_in_progress_with, info.agentName))
-            .setContentText(info.reason.ifBlank { context.getString(R.string.call_join_hint) })
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOngoing(true)
             .setSilent(true)
+            .addAction(R.drawable.ic_call, context.getString(R.string.call_join), join)
+            .also { b -> offer.answeredAt?.let { b.setUsesChronometer(true).setWhen(it) } }
+        val n = base()
+            .setContentText(info.reason.ifBlank { context.getString(R.string.call_join_hint) })
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(base().setContentText(context.getString(R.string.call_join_hint)).build())
+            .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .addAction(R.drawable.ic_call, context.getString(R.string.call_join), join)
-        offer.answeredAt?.let { b.setUsesChronometer(true).setWhen(it) }
-        NotificationManagerCompat.from(context).notify(ID_JOIN, b.build())
+            .build()
+        NotificationManagerCompat.from(context).notify(ID_JOIN, n)
     }
 
     fun cancelJoin(context: Context) {

@@ -26,7 +26,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class TelecomBridge(private val context: Context, private val scope: CoroutineScope) {
     interface Listener {
         /** The user answered from outside the app (headset, watch, car). */
-        fun onSystemAnswer()
+        fun onSystemAnswer(callId: String)
 
         /** Telecom ended the call (e.g. the user hung up from a headset, or another call took over). */
         fun onSystemDisconnect(cause: DisconnectCause)
@@ -78,7 +78,7 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
                 )
                 manager.addCall(
                     attrs,
-                    onAnswer = { listener.onSystemAnswer() },
+                    onAnswer = { listener.onSystemAnswer(callId) },
                     onDisconnect = { cause ->
                         Log.i(TAG, "telecom disconnect: $cause")
                         listener.onSystemDisconnect(cause)
