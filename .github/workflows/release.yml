@@ -105,8 +105,9 @@ jobs:
           AGENTRING_KEY_ALIAS: ${{ secrets.AGENTRING_KEY_ALIAS }}
           AGENTRING_KEY_PASSWORD: ${{ secrets.AGENTRING_KEY_PASSWORD }}
         run: |
+          # The GitHub APK includes Android Auto; Play bundles don't (docs/android-auto.md).
           ./gradlew --stacktrace :core:test :app:assembleRelease \
-            -PversionName="$VERSION" -PversionCode="$VERSION_CODE"
+            -PversionName="$VERSION" -PversionCode="$VERSION_CODE" -PagentringAndroidAuto=true
 
       - name: Remove the keystore
         if: always()
@@ -129,6 +130,8 @@ jobs:
           fi
           "$bt/aapt2" dump badging "$apk" | head -1 | tee /dev/stderr \
             | grep -q "versionCode='$VERSION_CODE' versionName='$VERSION'"
+          "$bt/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | grep -q "androidx.car.app.category.CALLING" \
+            || { echo "::error::The APK has no Android Auto entry point"; exit 1; }
           mkdir -p out && cp "$apk" "out/agentring-$VERSION.apk"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

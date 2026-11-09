@@ -144,7 +144,9 @@ agents you'd trust someone holding your phone with. Details and the threat model
 
 ## Limitations
 
-- Android only (no iOS yet).
+- Android only (no iOS yet). Android Auto is in beta and only in the APK from Releases:
+  Google Play doesn't allow calling apps for cars in production yet
+  ([docs/android-auto.md](docs/android-auto.md)).
 - One user per relay: no accounts.
 - The voice AI works best with a cloud realtime model (Gemini, OpenAI, Grok or Phonic). A local
   one runs on your own machine (`--provider local`), but it's experimental and slower; others

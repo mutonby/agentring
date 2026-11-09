@@ -13,6 +13,10 @@ firebaseBom = "34.0.0"
 codeScanner = "16.1.0"
 livekit = "2.29.0"
 coreTelecom = "1.0.1"
+# Android Auto (Car App Library); 1.8 is still a release candidate.
+carApp = "1.7.0"
+# car-app 1.7.0 pulls in Guava 31.1, which has OSV advisories; a constraint lifts it.
+guava = "33.7.2-android"
 junit = "4.13.2"
 androidxTestRunner = "1.6.2"
 androidxTestRules = "1.6.1"
@@ -48,6 +52,8 @@ firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "fir
 firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
 livekit-android = { module = "io.livekit:livekit-android", version.ref = "livekit" }
 androidx-core-telecom = { module = "androidx.core:core-telecom", version.ref = "coreTelecom" }
+androidx-car-app = { module = "androidx.car.app:app", version.ref = "carApp" }
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
 play-services-code-scanner = { module = "com.google.android.gms:play-services-code-scanner", version.ref = "codeScanner" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 androidx-test-rules = { module = "androidx.test:rules", version.ref = "androidxTestRules" }
@@ -56,6 +62,7 @@ androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "a
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

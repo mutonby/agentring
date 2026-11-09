@@ -537,6 +537,16 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
             s.agentInRoom.collect { here -> if (here && inRoom) onAgentAnswered(info.callId) }
         }
         callJobs += scope.launch {
+            // Muted or unmuted outside the app (Android Auto, a watch): follow it.
+            telecom.systemMuted.collect { muted ->
+                val cur = _state.value as? CallUi.Active ?: return@collect
+                if (telecomActive && cur.muted != muted) {
+                    session?.setMuted(muted)
+                    _state.value = cur.copy(muted = muted)
+                }
+            }
+        }
+        callJobs += scope.launch {
             telecom.endpoint.collect { ep ->
                 val cur = _state.value as? CallUi.Active ?: return@collect
                 if (ep != null) _state.value = cur.copy(speaker = ep.type == CallEndpointCompat.TYPE_SPEAKER)

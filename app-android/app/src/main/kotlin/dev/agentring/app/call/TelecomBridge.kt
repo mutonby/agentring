@@ -19,8 +19,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Registers the call with Android Telecom through Jetpack Core-Telecom, so the
- * system knows we're in a call (Bluetooth headset buttons, watches, cars,
- * audio routing, other calls). Optional: if the platform refuses, the call
+ * system knows we're in a call (Bluetooth headset buttons, watches, Android
+ * Auto's in-call view, audio routing, other calls). Optional: if the platform refuses, the call
  * still works with our own notification and audio routing.
  */
 class TelecomBridge(private val context: Context, private val scope: CoroutineScope) {
@@ -48,6 +48,7 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
     private val _endpoints = MutableStateFlow<List<CallEndpointCompat>>(emptyList())
     val endpoints: StateFlow<List<CallEndpointCompat>> = _endpoints
     private val _muted = MutableStateFlow(false)
+    /** Telecom's mute, e.g. the mute button of Android Auto's in-call view. */
     val systemMuted: StateFlow<Boolean> = _muted
 
     /**
@@ -123,6 +124,7 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
                 ready.complete(false)
                 _endpoint.value = null
                 _endpoints.value = emptyList()
+                _muted.value = false
             }
         }
         // addCall must not hold up the ringing; give it a moment, then go on without it.

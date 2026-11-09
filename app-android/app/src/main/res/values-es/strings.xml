@@ -172,4 +172,6 @@
     <string name="call_in_progress_with">Llamada en curso con %1$s</string>
     <string name="call_join">Unirse</string>
     <string name="call_join_hint">Unirse a la llamada</string>
+    <string name="car_not_paired">Primero vincula agentring en el móvil, cuando sea seguro hacerlo.</string>
+    <string name="car_needs_mic">Primero permite el micrófono a agentring en el móvil, cuando sea seguro hacerlo.</string>
 </resources>

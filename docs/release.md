@@ -182,6 +182,13 @@ AGENTRING_REQUIRE_RELEASE_KEY=1 ./gradlew :app:bundleRelease -PversionName=0.3.0
 `versionCode` must grow with every upload. The app targets API 36, which Play requires
 for new apps and updates from 2026-08-31.
 
+**Android Auto stays out of production bundles.** Google Play takes calling apps for cars
+only on its internal and closed testing tracks and rejects a production or open-testing
+release that contains one, so `bundleRelease` leaves the car entry point out by default.
+For a closed-testing track with Android Auto, build a separate bundle with
+`-PagentringAndroidAuto=true` and a higher `versionCode`, and never promote it to
+production ([android-auto.md](android-auto.md)). The GitHub APK always includes it.
+
 Play Console items this app needs:
 
 - **Privacy policy:** `https://agentring.io/privacy`. **Account deletion:**

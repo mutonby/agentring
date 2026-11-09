@@ -179,4 +179,7 @@
     <string name="perm_background_why">Lets the call start while the app is closed.</string>
     <string name="perm_dnd_why">Urgent calls ring even in Do Not Disturb.</string>
     <string name="perm_optional_why">Optional. %1$s</string>
+    <!-- Android Auto: short, and only "on your phone" when it is safe (no task on the phone while driving). -->
+    <string name="car_not_paired">Pair agentring on your phone first, when it\'s safe to do so.</string>
+    <string name="car_needs_mic">Allow the microphone for agentring on your phone first, when it\'s safe to do so.</string>
 </resources>

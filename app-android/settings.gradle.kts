@@ -29,4 +29,6 @@ rootProject.name = "agentring-android"
 include(":core")
 if (!coreOnly) {
     include(":app")
+    // Android Auto entry point: only its manifest, so builds can leave it out (docs/android-auto.md).
+    include(":auto")
 }

@@ -24,6 +24,12 @@ if (releaseKeystore == null && buildsRelease) {
     )
 }
 
+// Android Auto (docs/android-auto.md). Google Play takes calling apps for cars only on its
+// internal and closed testing tracks and rejects them on open testing and production, so
+// release builds leave the car entry point out unless -PagentringAndroidAuto=true (the
+// GitHub APK, a closed-testing bundle). Debug builds always include it.
+val androidAuto = providers.gradleProperty("agentringAndroidAuto").orNull == "true"
+
 android {
     namespace = "dev.agentring.app"
     compileSdk = 36
@@ -131,6 +137,12 @@ dependencies {
     implementation(libs.play.services.code.scanner)
     implementation(libs.livekit.android)
     implementation(libs.androidx.core.telecom)
+    implementation(libs.androidx.car.app)
+    constraints {
+        implementation(libs.guava) { because("car-app's Guava 31.1 has OSV advisories") }
+    }
+    debugImplementation(project(":auto"))
+    if (androidAuto) releaseImplementation(project(":auto"))
 
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
