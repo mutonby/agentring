@@ -33,7 +33,9 @@ from .sync import catch_up
 
 log = logging.getLogger("agentring.mcp")
 
-PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+# Newest first. 2025-11-25 needs nothing new from a tools-only server: argument errors are
+# already tool results with isError, and the HTTP server checks Origin. Hermes sends it.
+PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = (
     "agentring reaches the user on their phone. Use send_message for anything that can wait and get_replies "

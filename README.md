@@ -53,7 +53,9 @@ and anything you can run as a command can be consulted from a call.
 | Hermes | MCP | `hermes -z` |
 | n8n, scripts, anything with HTTP | REST API, CLI | any command, or a small script for an HTTP agent |
 
-Copy-paste setup for each: [docs/agents.md](docs/agents.md#recipes-by-harness).
+Copy-paste setup for each: [docs/agents.md](docs/agents.md#recipes-by-harness). OpenClaw and
+Hermes have one command for all of it: `agentring connect openclaw` / `agentring connect hermes`,
+or install the [skill](skills/agentring) and ask your agent to set agentring up.
 
 ## How it works
 

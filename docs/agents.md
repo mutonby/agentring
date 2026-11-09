@@ -32,7 +32,8 @@ when several agents share one relay), and `--device dev_…` (repeatable) rings 
 phones instead of every paired one.
 
 `call` blocks until the call ends, and `get_replies` up to `wait_s`: raise the
-client's MCP tool timeout if it has a short one (Codex: 60 s, opencode: 30 s).
+client's MCP tool timeout if it has a short one (Codex: 60 s, OpenClaw: 60 s,
+opencode: 30 s, Hermes: 300 s).
 
 | Tool | What it does |
 |---|---|
@@ -212,12 +213,42 @@ you, and anything you can run as a command can be consulted from a call.
 | Claude Code | `claude mcp add agentring -- agentring mcp` |
 | Codex | `codex mcp add agentring -- agentring mcp`, then `tool_timeout_sec = 1800` under `[mcp_servers.agentring]` in `~/.codex/config.toml` |
 | opencode | `opencode.json`: `"mcp": {"agentring": {"type": "local", "command": ["agentring", "mcp"], "timeout": 1800000}}` |
-| OpenClaw | `openclaw mcp set agentring '{"command":"agentring","args":["mcp"]}'` |
-| Hermes | `~/.hermes/config.yaml`: `mcp_servers: {agentring: {command: agentring, args: [mcp], timeout: 1800}}` |
+| OpenClaw | `agentring connect openclaw`, or by hand: `openclaw mcp set agentring '{"command":"agentring","args":["mcp"],"requestTimeoutMs":1800000}'` |
+| Hermes | `agentring connect hermes`, or by hand in `~/.hermes/config.yaml`: `mcp_servers: {agentring: {command: agentring, args: [mcp], timeout: 1800}}` |
 | Anything else | the `mcpServers` JSON above, the `agentring` CLI, or the [REST API](#rest-api-n8n-scripts) |
 
 Add [`skills/agentring`](../skills/agentring) where the harness reads skills, so the
-agent knows when to message and when to call.
+agent knows when to message and when to call (`agentring connect` does it for you).
+
+### `agentring connect` (OpenClaw, Hermes)
+
+One command sets up the whole thing for OpenClaw or Hermes, and is safe to run again:
+
+```bash
+agentring connect openclaw                     # or: agentring connect hermes
+agentring connect hermes --dry-run             # show what would change
+AGENTRING_API_KEY=ak_... agentring connect hermes --url https://agentring.io/mcp   # hosted MCP server
+```
+
+1. **MCP server.** Registers `agentring mcp` (by absolute path, with `--agent-name
+   OpenClaw`/`Hermes` so the phone shows who is calling) through `openclaw mcp set`, or in
+   `$HERMES_HOME/config.yaml` (default `~/.hermes`; the old file is kept as
+   `config.yaml.bak-agentring`). The tool timeout goes to 30 minutes, since a `call` lasts
+   as long as the conversation. With `--url`, the remote server instead: the key goes to
+   the harness's `.env` (`~/.openclaw/.env`, `~/.hermes/.env`, mode 0600) and the config
+   only says `Bearer ${AGENTRING_API_KEY}`.
+2. **Skill.** Installs [`skills/agentring`](../skills/agentring) (OpenClaw: `openclaw skills
+   install --global`; Hermes: `~/.hermes/skills/agentring`). `--no-skill` skips it.
+3. **Consult from a call.** Adds the harness to `~/.agentring/agents.yaml` with the
+   recipe below (comments in the file are kept). Not with `--url`: a remote server never
+   runs commands. `--no-consult` skips it.
+
+Then OpenClaw picks the server up on the next turn (`openclaw mcp probe agentring`
+checks it); in Hermes run `/reload-mcp` or start a new session (`hermes mcp test
+agentring`). The skill also carries a setup guide
+([`references/setup.md`](../skills/agentring/references/setup.md)): install it first
+(`openclaw skills install @mutonby/agentring`, `hermes skills install
+mutonby/agentring/skills/agentring`) and ask your agent to "set up agentring".
 
 ### You consult your agent from a call (`agents.yaml`)
 

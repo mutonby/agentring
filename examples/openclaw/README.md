@@ -6,12 +6,25 @@ you can reach it from a call (an agent in `agents.yaml`). Recipes for other harn
 
 ## OpenClaw reaches you
 
+The quickest way: install the skill and ask OpenClaw to "set up agentring"; it walks
+you through the rest ([setup guide](../../skills/agentring/references/setup.md)).
+
+```bash
+openclaw skills install @mutonby/agentring --global
+```
+
+Or by hand:
+
 ```bash
 agentring init --relay https://relay.example.com --api-key ak_...
 agentring pair                                   # scan the QR with the app
-openclaw mcp set agentring '{"command":"agentring","args":["mcp"]}'
-cp -r ../../skills/agentring ~/.openclaw/skills/  # when to message and when to call
+agentring connect openclaw                       # MCP server, skill and agents.yaml
 ```
+
+`agentring connect` registers `agentring mcp` with a 30-minute tool timeout (OpenClaw's
+default is 60 s, shorter than a call), installs the skill and adds OpenClaw to
+`~/.agentring/agents.yaml` (the recipe below). With agentring cloud, no daemon:
+`AGENTRING_API_KEY=ak_... agentring connect openclaw --url https://agentring.io/mcp`.
 
 Calls need the voice extra and a Gemini API key (free tier available at
 https://aistudio.google.com/apikey), or the key of another voice provider (OpenAI, Grok,
@@ -26,7 +39,8 @@ Then, for example: *"Check my inbox every hour; if something is urgent, call me.
 
 ## You reach OpenClaw by phone
 
-`~/.agentring/agents.yaml`:
+`agentring connect openclaw` already added an entry like this to `~/.agentring/agents.yaml`
+(with the absolute path of `openclaw` as `$0`, so it works without your PATH):
 
 ```yaml
 agents:

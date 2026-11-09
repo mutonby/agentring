@@ -128,7 +128,11 @@ def test_handshake_sessions_and_http_errors(relay: str, start):
     r = c.post({"jsonrpc": "2.0", "id": 99, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}})
     assert r.json()["result"]["protocolVersion"] == "2024-11-05"
     r = c.post({"jsonrpc": "2.0", "id": 99, "method": "initialize", "params": {"protocolVersion": "1999-01-01"}})
-    assert r.json()["result"]["protocolVersion"] == "2025-06-18"
+    assert r.json()["result"]["protocolVersion"] == "2025-11-25"
+    # Hermes speaks 2025-11-25 and sends it in the header.
+    r = c.post({"jsonrpc": "2.0", "id": 98, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
+               **{"mcp-protocol-version": "2025-11-25"})
+    assert r.status_code == 200 and r.json()["result"]["protocolVersion"] == "2025-11-25"
 
     # Batches (2025-03-26) get an array back.
     r = c.post([{"jsonrpc": "2.0", "id": "a", "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/x"},

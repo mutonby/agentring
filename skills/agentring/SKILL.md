@@ -1,12 +1,17 @@
 ---
 name: agentring
-description: Reach the user on their phone through agentring — send a message, wait for their reply, or call them (a voice AI talks to them for you and returns the transcript). Use when you need the user's decision or attention and they may be away from the screen, when a long task finishes or fails, or when the user asks you to message or call them.
+description: Reach the user on their phone through agentring — send a message, wait for their reply, or call them (a voice AI talks to them for you and returns the transcript). Use when you need the user's decision or attention and they may be away from the screen, when a long task finishes or fails, or when the user asks you to message or call them. Also use when the user asks to set up, install or connect agentring.
+homepage: https://agentring.io
 ---
 
 # agentring
 
-agentring rings and messages the user's own phone. The tools come from the
-`agentring` MCP server (`agentring mcp`; setup for each harness in docs/agents.md).
+agentring rings and messages the user's own Android phone, over the internet (no phone
+number). The tools (`send_message`, `get_replies`, `call`, `status`) come from the
+`agentring` MCP server.
+
+**Not connected yet?** If those tools are missing, or the user asks you to set agentring
+up, follow [references/setup.md](references/setup.md).
 
 ## Pick the lightest channel
 

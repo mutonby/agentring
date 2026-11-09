@@ -820,6 +820,48 @@ def serve(
     log.info("stopped")
 
 
+@app.command()
+def connect(
+    harness: Annotated[str, typer.Argument(help="The agent harness to connect: openclaw or hermes.")],
+    url: Annotated[Optional[str], typer.Option(
+        "--url", help="Use a remote MCP server instead of the local one, e.g. https://agentring.io/mcp. "
+        "The API key comes from AGENTRING_API_KEY (or this machine's agentring config).")] = None,
+    skill: Annotated[bool, typer.Option("--skill/--no-skill", help="Install the agentring skill.")] = True,
+    consult: Annotated[bool, typer.Option(
+        "--consult/--no-consult", help="Add the harness to agents.yaml, so the voice AI can consult it on a call "
+        "(local MCP only).")] = True,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would change; change nothing.")] = False,
+    json_out: JsonOpt = False,
+) -> None:
+    """Connect OpenClaw or Hermes: MCP server, skill and agents.yaml. Safe to run again."""
+    from dataclasses import asdict
+
+    from .config import secret
+    from .connect import ConnectError, connect as do_connect
+
+    api_key = None
+    if url:
+        api_key = secret("AGENTRING_API_KEY")
+        if not api_key:
+            raise _fail("--url needs the API key: set AGENTRING_API_KEY (ak_…), e.g. "
+                        "`AGENTRING_API_KEY=ak_... agentring connect hermes --url …`")
+    try:
+        steps = do_connect(harness.lower(), url=url, api_key=api_key, skill=skill, consult=consult, dry_run=dry_run)
+    except ConnectError as e:
+        raise _fail(str(e)) from None
+    if json_out:
+        _emit_json({"harness": harness.lower(), "dry_run": dry_run, "steps": [asdict(s) for s in steps]})
+        return
+    for s in steps:
+        typer.echo(f"{s.what:<20} {s.status:<12} {s.detail}".rstrip())
+    if dry_run:
+        return
+    if harness.lower() == "openclaw":
+        typer.echo("\nOpenClaw picks it up on the next turn. Check: openclaw mcp probe agentring")
+    else:
+        typer.echo("\nIn Hermes, run /reload-mcp or start a new session. Check: hermes mcp test agentring")
+
+
 def main() -> None:
     app()
 
