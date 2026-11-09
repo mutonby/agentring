@@ -41,23 +41,12 @@ Ask which one they want:
    AGENTRING_API_KEY=ak_... agentring connect openclaw --url https://agentring.io/mcp   # or: hermes
    ```
 
-   It stores the key in the harness's `.env` (`~/.openclaw/.env`, `~/.hermes/.env`),
-   registers the server with a 30-minute tool timeout (a call lasts as long as the
-   conversation) and installs this skill. Without the `agentring` command, do the same
-   by hand:
-
-   - OpenClaw: add `AGENTRING_API_KEY=ak_...` to `~/.openclaw/.env`, then
-     `openclaw mcp set agentring '{"url":"https://agentring.io/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${AGENTRING_API_KEY}"},"requestTimeoutMs":1800000}'`
-   - Hermes: `hermes config set AGENTRING_API_KEY ak_...`, then in `~/.hermes/config.yaml`:
-
-     ```yaml
-     mcp_servers:
-       agentring:
-         url: https://agentring.io/mcp
-         headers: {Authorization: "Bearer ${AGENTRING_API_KEY}"}
-         timeout: 1800
-     ```
-
+   The command keeps the key out of your config files, registers the server with a
+   30-minute tool timeout (a call lasts as long as the conversation) and installs this
+   skill. Prefer that the user runs it themselves, so the key never passes through you.
+   Without the `agentring` command, the user follows the manual steps on
+   https://agentring.io/agents/openclaw or https://agentring.io/agents/hermes; don't
+   edit your own configuration files for this.
 3. Go to **4**.
 
 ## 3b. Self-hosted relay
@@ -112,4 +101,4 @@ Ask which one they want:
 - Tool times out during a call: the harness's MCP timeout is too short; run
   `agentring connect …` again, or set it to 1800 s (`requestTimeoutMs: 1800000` in
   OpenClaw, `timeout: 1800` in Hermes).
-- Docs: https://github.com/mutonby/agentring/blob/main/docs/agents.md
+- Docs: https://agentring.io (Agents menu) and https://github.com/mutonby/agentring

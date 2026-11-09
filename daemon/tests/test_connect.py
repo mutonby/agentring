@@ -74,6 +74,18 @@ def test_packaged_skill_matches_repo_skill() -> None:
     assert "SKILL.md" in repo and "references/setup.md" in repo
 
 
+def test_skill_text_passes_skill_scanners() -> None:
+    """Hermes' skills guard blocks a community skill that points the agent at a harness's
+    config or .env files (it reads like exfiltration), so the skill sends the agent to
+    `agentring connect` and to the web pages for manual steps instead."""
+    banned = [".hermes/", ".openclaw/", "hermes config set", "config.yaml", "openclaw.json", "AGENTS.md",
+              "agents.md"]
+    for rel, data in c.skill_files().items():
+        text = data.decode().lower()
+        for word in banned:
+            assert word.lower() not in text, f"{rel} mentions {word!r}"
+
+
 def test_mcp_entry_has_long_timeout_and_absolute_command(homes: Path) -> None:
     oc = c.mcp_entry(c.HARNESSES["openclaw"], exe="/opt/bin/agentring")
     assert oc == {"command": "/opt/bin/agentring", "args": ["mcp", "--agent-name", "OpenClaw"],
