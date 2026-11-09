@@ -115,7 +115,9 @@ the daemon on the VPS instead, next to the relay, see the `daemon` profile at th
 ## 4. The app
 
 1. On the phone, install agentring from
-   [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app). Without Play, download `agentring.apk` from the
+   [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app). This is the
+   recommended way: Play keeps the app up to date, and the same app works with your own relay
+   (you pair it with your relay's QR code below). If you'd rather not use Play, download `agentring.apk` from the
    [latest release](https://github.com/mutonby/agentring/releases) and install it (Android
    asks you to allow installs from your browser once). The two are signed with different
    keys, so to switch from one to the other, uninstall the app first.

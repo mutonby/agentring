@@ -121,8 +121,11 @@ agentring call "Testing agentring" --ai       # + --provider openai|grok|phonic
 claude mcp add agentring -- agentring mcp
 ```
 
-Get the app on [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app), or the APK from
-[Releases](https://github.com/mutonby/agentring/releases). The full
+Install the app from **[Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app)**
+(recommended: it updates itself, and the same app works with agentring cloud and with your
+own relay). The APK on [Releases](https://github.com/mutonby/agentring/releases) is for
+those who'd rather not use Play; it's signed with a different key, so uninstall one before
+installing the other. The full
 tutorial, step by step for both options and with a troubleshooting table:
 **[docs/setup.md](docs/setup.md)**. If the phone doesn't ring when locked, it's usually the
 vendor's battery saver: [docs/troubleshooting-oem.md](docs/troubleshooting-oem.md).
