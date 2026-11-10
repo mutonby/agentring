@@ -74,6 +74,20 @@ def test_packaged_skill_matches_repo_skill() -> None:
     assert "SKILL.md" in repo and "references/setup.md" in repo
 
 
+def test_grok_plugin_carries_the_skill_and_hosted_server() -> None:
+    """plugins/agentring (Grok Build marketplace): same skill, and only the hosted MCP
+    server with the key taken from the environment (plugins must not carry secrets)."""
+    plugin = ROOT / "plugins/agentring"
+    copy = {p.relative_to(plugin / "skills/agentring").as_posix(): p.read_bytes()
+            for p in (plugin / "skills/agentring").rglob("*") if p.is_file()}
+    assert copy == c.skill_files()
+    servers = json.loads((plugin / ".mcp.json").read_text())["mcpServers"]
+    assert servers == {"agentring": {"type": "http", "url": "https://agentring.io/mcp",
+                                     "headers": {"Authorization": "Bearer ${AGENTRING_API_KEY}"}}}
+    manifest = json.loads((plugin / ".grok-plugin/plugin.json").read_text())
+    assert manifest["name"] == "agentring" and manifest["license"] == "Apache-2.0"
+
+
 def test_skill_text_passes_skill_scanners() -> None:
     """Hermes' skills guard blocks a community skill that points the agent at a harness's
     config or .env files (it reads like exfiltration), so the skill sends the agent to

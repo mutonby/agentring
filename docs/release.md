@@ -206,3 +206,20 @@ Play Console items this app needs:
   is encrypted (https/wss); the user can delete it (unpair, or delete the cloud account).
 - New personal developer accounts must run a closed test (12+ testers, 14 days) before
   production; organisation accounts don't.
+
+## Directories
+
+Where agentring is listed, and what to refresh after a release:
+
+- **MCP Registry** (`registry.modelcontextprotocol.io`, feeds GitHub's registry and other
+  directories): [`server.json`](../server.json) lists the hosted server
+  (`https://agentring.io/mcp`) as `io.github.mutonby/agentring`. Set its `version` to the
+  release, then `mcp-publisher validate`, `mcp-publisher login github` and
+  `mcp-publisher publish` from the repository root. A version can be published once.
+- **Grok Build plugin marketplace** (`xai-org/plugin-marketplace`):
+  [`plugins/agentring`](../plugins/agentring) is the plugin (the hosted MCP server and a
+  copy of the skill; a test keeps the copy equal). The catalog entry pins a commit of this
+  repository, so after changing the plugin or the skill, open a PR there that bumps the
+  `sha` and regenerates the index (its CONTRIBUTING.md has the commands).
+- **ClawHub**: `clawhub skill publish skills/agentring --slug agentring --version <x.y.z>`
+  after changing the skill.

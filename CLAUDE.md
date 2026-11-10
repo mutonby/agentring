@@ -50,6 +50,8 @@ downgraded certifi to a version with compromised CA roots.
 ## Repository layout
 
 ```
+server.json     MCP Registry entry for the hosted MCP server (docs/release.md#directories)
+plugins/        agentring/ = Grok Build plugin (hosted MCP + a copy of skills/agentring; a test keeps it equal)
 protocol/       relay.openapi.yaml (REST + event schemas), examples/ (event fixtures, push signature vector)
 relay/          TypeScript, Fastify 5, node:sqlite (no native deps), jose; FCM HTTP v1 without firebase-admin
 daemon/         Python ≥3.11 + uv; `agentring` CLI (typer), local SQLite mirror synced from the relay

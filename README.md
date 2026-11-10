@@ -49,6 +49,7 @@ and anything you can run as a command can be consulted from a call.
 | Claude Code | MCP | `claude -p` |
 | Codex | MCP | `codex exec` |
 | opencode | MCP | `opencode run` |
+| Grok Build | MCP, or the [plugin](plugins/agentring) | |
 | OpenClaw | MCP | `openclaw agent` |
 | Hermes | MCP | `hermes -z` |
 | n8n, scripts, anything with HTTP | REST API, CLI | any command, or a small script for an HTTP agent |

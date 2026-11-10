@@ -215,6 +215,7 @@ you, and anything you can run as a command can be consulted from a call.
 | opencode | `opencode.json`: `"mcp": {"agentring": {"type": "local", "command": ["agentring", "mcp"], "timeout": 1800000}}` |
 | OpenClaw | `agentring connect openclaw`, or by hand: `openclaw mcp set agentring '{"command":"agentring","args":["mcp"],"requestTimeoutMs":1800000}'` |
 | Hermes | `agentring connect hermes`, or by hand in `~/.hermes/config.yaml`: `mcp_servers: {agentring: {command: agentring, args: [mcp], timeout: 1800}}` |
+| Grok Build | `grok mcp add agentring -- agentring mcp` (its default tool timeout is long enough). With agentring cloud, the plugin instead: `grok plugin install mutonby/agentring#plugins/agentring --trust` and `AGENTRING_API_KEY` in your environment ([plugins/agentring](../plugins/agentring)) |
 | Anything else | the `mcpServers` JSON above, the `agentring` CLI, or the [REST API](#rest-api-n8n-scripts) |
 
 Add [`skills/agentring`](../skills/agentring) where the harness reads skills, so the

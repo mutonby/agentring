@@ -47,6 +47,11 @@ Ask which one they want:
    Without the `agentring` command, the user follows the manual steps on
    https://agentring.io/agents/openclaw or https://agentring.io/agents/hermes; don't
    edit your own configuration files for this.
+
+   In another harness: if the `agentring` MCP server came with a plugin (Grok Build), the
+   user only sets `AGENTRING_API_KEY` in the environment the harness starts from, then
+   restarts it. Otherwise they add `https://agentring.io/mcp` as a remote MCP server with
+   the header `Authorization: Bearer <key>` and a tool timeout of 30 minutes.
 3. Go to **4**.
 
 ## 3b. Self-hosted relay
