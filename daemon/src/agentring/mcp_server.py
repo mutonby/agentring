@@ -475,9 +475,35 @@ class McpServer:
             await asyncio.gather(*self._running.values(), return_exceptions=True)
 
 
-def run_stdio(settings: Settings, *, agent_name: str | None = None, device_ids: list[str] | None = None) -> None:
+class NotConfiguredTools:
+    """Stands in for the tools when agentring has no relay or API key yet: the server still
+    starts and lists its tools (MCP clients and directories inspect a server before anyone
+    configures it), and every tool call answers with what to do."""
+
+    upgrade_url = None
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def __getattr__(self, name: str) -> Callable[..., Awaitable[dict[str, Any]]]:
+        if name not in TOOL_NAMES:
+            raise AttributeError(name)
+
+        async def tool(**_args: Any) -> dict[str, Any]:
+            raise ToolError(f"agentring is not set up on this computer. {self.reason}")
+
+        return tool
+
+    def close(self) -> None:
+        pass
+
+
+def run_stdio(settings: Settings | None, *, agent_name: str | None = None, device_ids: list[str] | None = None,
+              not_configured: str = "") -> None:
+    """`settings` None: serve with `NotConfiguredTools(not_configured)`."""
     async def main() -> None:
-        tools = AgentringTools.from_settings(settings, agent_name=agent_name, device_ids=device_ids)
+        tools: Any = (AgentringTools.from_settings(settings, agent_name=agent_name, device_ids=device_ids)
+                      if settings is not None else NotConfiguredTools(not_configured))
         out = sys.stdout
 
         def write(line: str) -> None:

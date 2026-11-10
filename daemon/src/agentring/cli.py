@@ -702,7 +702,14 @@ def mcp(
     """Run as an MCP server over stdio, for agents: `claude mcp add agentring -- agentring mcp`."""
     from .mcp_server import run_stdio
 
-    run_stdio(_settings(), agent_name=agent_name, device_ids=device or None)
+    try:
+        settings = load_settings()
+    except ConfigError as e:
+        # Start anyway: the agent sees the tools and learns from the first call what is missing.
+        typer.echo(f"agentring mcp: {e}", err=True)
+        run_stdio(None, not_configured=str(e))
+        return
+    run_stdio(settings, agent_name=agent_name, device_ids=device or None)
 
 
 @app.command("mcp-http")

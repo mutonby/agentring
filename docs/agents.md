@@ -52,6 +52,9 @@ With `agentring mcp --device`, the call is private to those phones. If nobody an
 or an agent's answer comes after the call, nothing is sent as a message, because a
 message reaches every paired phone: the calling agent still gets the result.
 
+Before `agentring init`, the server still starts and lists its tools; each tool call then
+answers with what is missing, so the agent can tell you.
+
 The server is a small JSON-RPC loop with no MCP SDK and no extra dependencies
 (see [architecture](architecture.md#accepted-deviations)). For an MCP URL instead of
 a local command, see [Remote MCP (HTTP)](#remote-mcp-http). HTTP-only clients such

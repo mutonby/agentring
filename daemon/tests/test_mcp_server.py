@@ -90,3 +90,25 @@ def test_mcp_server_messages(relay: str, agentring_home):
         assert c.request("nope/method")["error"]["code"] == -32601
     finally:
         c.close()
+
+
+def test_server_starts_without_configuration() -> None:
+    """Not configured yet: the server still lists its tools (clients and directories inspect it
+    first) and a tool call says what is missing instead of the process exiting."""
+    import asyncio
+
+    from agentring.mcp_server import NotConfiguredTools, handle_rpc
+
+    tools = NotConfiguredTools("Run: agentring init")
+
+    async def run() -> tuple[dict, dict]:
+        listed = await handle_rpc(tools, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})  # type: ignore[arg-type]
+        called = await handle_rpc(tools, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",  # type: ignore[arg-type]
+                                          "params": {"name": "send_message", "arguments": {"text": "hi"}}})
+        assert listed and called
+        return listed, called
+
+    listed, called = asyncio.run(run())
+    assert {t["name"] for t in listed["result"]["tools"]} == {"send_message", "get_replies", "call", "status"}
+    assert called["result"]["isError"] is True
+    assert "not set up" in called["result"]["content"][0]["text"] and "agentring init" in called["result"]["content"][0]["text"]
