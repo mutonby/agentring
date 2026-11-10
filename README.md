@@ -58,6 +58,9 @@ Copy-paste setup for each: [docs/agents.md](docs/agents.md#recipes-by-harness). 
 Hermes have one command for all of it: `agentring connect openclaw` / `agentring connect hermes`,
 or install the [skill](skills/agentring) and ask your agent to set agentring up.
 
+The skill installs in any harness that reads skills with `npx skills add mutonby/agentring`
+([skills.sh](https://skills.sh/mutonby/agentring)), and from ClawHub as `@mutonby/agentring`.
+
 ## How it works
 
 ```

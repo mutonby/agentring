@@ -221,5 +221,9 @@ Where agentring is listed, and what to refresh after a release:
   copy of the skill; a test keeps the copy equal). The catalog entry pins a commit of this
   repository, so after changing the plugin or the skill, open a PR there that bumps the
   `sha` and regenerates the index (its CONTRIBUTING.md has the commands).
+- **skills.sh**: nothing to publish. It lists `skills/agentring` from this repository as
+  people install it (`npx skills add mutonby/agentring`).
+- **awesome-mcp-servers** (`punkpeye/awesome-mcp-servers`, Communication): one line in
+  its README; only needs a PR if the description changes.
 - **ClawHub**: `clawhub skill publish skills/agentring --slug agentring --version <x.y.z>`
   after changing the skill.
