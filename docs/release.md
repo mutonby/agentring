@@ -223,6 +223,11 @@ Where agentring is listed, and what to refresh after a release:
   `sha` and regenerates the index (its CONTRIBUTING.md has the commands).
 - **skills.sh**: nothing to publish. It lists `skills/agentring` from this repository as
   people install it (`npx skills add mutonby/agentring`).
+- **Glama** (`glama.ai/mcp/servers/mutonby/agentring`): it builds the server from this
+  repository with the settings on its admin page (build step `uv sync --project daemon
+  --frozen --no-dev`, command `uv run --project daemon --no-sync agentring mcp`, Python
+  3.12, placeholder relay URL and API key) and checks that it starts and lists its tools.
+  Auto-release is on: it rebuilds on every GitHub release.
 - **awesome-mcp-servers** (`punkpeye/awesome-mcp-servers`, Communication): one line in
   its README; only needs a PR if the description changes.
 - **ClawHub**: `clawhub skill publish skills/agentring --slug agentring --version <x.y.z>`
