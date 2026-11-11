@@ -35,7 +35,7 @@ Source = "https://github.com/mutonby/agentring"
 [project.optional-dependencies]
 # Voice (M2+): LiveKit realtime SDK (brings numpy). The AI models are spoken to directly over
 # their WebSocket APIs (websockets, already a dependency): no livekit-agents, no provider SDKs.
-voice = ["livekit>=1.1.20,<1.2"]
+voice = ["livekit>=1.1.20,<1.3"]
 
 [project.scripts]
 agentring = "agentring.cli:main"
