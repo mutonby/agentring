@@ -9,6 +9,10 @@ Self-hosted and open source. No phone numbers, no Twilio, no per-minute fees: ca
 over VoIP from your own server to your own phone. Don't want to run a server? The hosted
 version is at [agentring.io](https://agentring.io) (contact: info@agentring.io).
 
+**[Try it hosted, free →](https://agentring.io/login)** No server to run: sign in, pair your
+phone, add one MCP server to your agent. About five minutes. ·
+**[Get the Android app on Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app)**
+
 [![CI](https://github.com/mutonby/agentring/actions/workflows/ci.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/ci.yml)
 [![Android](https://github.com/mutonby/agentring/actions/workflows/android.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/android.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)

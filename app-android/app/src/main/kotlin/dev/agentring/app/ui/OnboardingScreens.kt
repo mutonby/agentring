@@ -398,7 +398,8 @@ private fun PairPage(setup: Setup, onPaired: () -> Unit) {
                     NumberedStep(1, stringResource(R.string.pair_cloud_1), stringResource(R.string.pair_cloud_1_body)) {
                         if (BuildConfig.CLOUD_URL.isNotEmpty()) {
                             TextButton(
-                                onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.CLOUD_URL))) },
+                                // Straight to the dashboard (sign-in first if needed), where the pairing code is.
+                                onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.CLOUD_URL.trimEnd('/') + "/app"))) },
                                 contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                                 modifier = Modifier.testTag("use_cloud"),
                             ) {
