@@ -150,15 +150,15 @@ portal + webhook that sets the tenant's limits.
 
 ### Plans
 
-| | Free | Pro — $9/month |
+| | Free | Pro — $12/month plus tax |
 |---|---|---|
 | Phones | 1 | 5 |
-| Call minutes / month (incl. hosted voice AI) | 10 | 200 |
+| Call minutes / month (incl. hosted voice AI) | 10 | 100 |
 | Messages / day | 100 | 2000 |
 | Self-hosted | always free, no limits | |
 
 Limits as admin-API values — Free: `{max_devices: 1, call_seconds_per_month: 600,
-messages_per_day: 100}`; Pro: `{max_devices: 5, call_seconds_per_month: 12000,
+messages_per_day: 100}`; Pro: `{max_devices: 5, call_seconds_per_month: 6000,
 messages_per_day: 2000}`.
 
 ## Deploy
