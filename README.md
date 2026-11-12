@@ -5,14 +5,14 @@ long job, your phone rings like a real call, even locked and in Doze. A voice AI
 you what's going on, you talk it through, and the agent gets the transcript and carries
 on. You can also call your agents back from the app and ask them things by voice.
 
-Self-hosted and open source. No phone numbers, no Twilio, no per-minute fees: calls go
-over VoIP from your own server to your own phone. Don't want to run a server? The hosted
-version is at [agentring.io](https://agentring.io) (contact: info@agentring.io).
+Open source, with no phone numbers, no Twilio and no per-minute telephony fees: calls go
+over VoIP straight to the app. Use the hosted version at [agentring.io](https://agentring.io),
+or run everything on your own server.
 
-**[Try it hosted, free →](https://agentring.io/login)** No server to run: sign in, pair your
-phone, add one MCP server to your agent. About five minutes. ·
-**[Get the Android app on Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app)**
+[![Get it on Google Play](https://img.shields.io/badge/Google_Play-Get_the_app-1f1f1f?style=for-the-badge&logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=dev.agentring.app&referrer=utm_source%3Dgithub%26utm_medium%3Dreadme)
+[![Try it hosted, free](https://img.shields.io/badge/agentring.io-Try_it_hosted%2C_free-c2410c?style=for-the-badge)](https://agentring.io/login)
 
+[![GitHub stars](https://img.shields.io/github/stars/mutonby/agentring?style=flat&logo=github)](https://github.com/mutonby/agentring/stargazers)
 [![CI](https://github.com/mutonby/agentring/actions/workflows/ci.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/ci.yml)
 [![Android](https://github.com/mutonby/agentring/actions/workflows/android.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/android.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -24,9 +24,26 @@ calls the locked phone, you decide, it carries on. The phone is a screen recordi
 audio (the ringtone was added), the terminal is redrawn from Claude Code's output, and only the waits were cut. Silent
 version: [demo.gif](docs/media/demo.gif).*
 
-> **Pre-release.** Messages, calls on a locked phone, the voice AI, calling your agent
-> from the app and the MCP server all work. So far it has been tested on one phone
-> (Pixel 6, Android 16). Android only for now.
+## Try it in five minutes
+
+With the hosted version there is no server, Firebase project or voice AI key to set up.
+
+1. **Install the app** from [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app&referrer=utm_source%3Dgithub%26utm_medium%3Dreadme) (Android 8 or newer).
+2. **[Sign in at agentring.io](https://agentring.io/login)** with your email (free plan, no
+   card) and scan the QR code on your dashboard with the app. The phone is paired.
+3. **Add the MCP server to your agent.** The dashboard shows the command with your key:
+
+   ```bash
+   claude mcp add --transport http agentring https://agentring.io/mcp \
+     --header "Authorization: Bearer ak_…"
+   ```
+
+Then ask your agent: *"run the migration and call me if anything fails."*
+
+The free plan has 1 phone, 10 call minutes a month with the voice AI included, and 100
+messages a day. Other agents (Codex, opencode, OpenClaw, Hermes, n8n):
+[docs/agents.md](docs/agents.md#recipes-by-harness). To run it all yourself instead, see
+[Self-hosting](#self-hosting).
 
 ## What it does
 
@@ -65,6 +82,45 @@ or install the [skill](skills/agentring) and ask your agent to set agentring up.
 The skill installs in any harness that reads skills with `npx skills add mutonby/agentring`
 ([skills.sh](https://skills.sh/mutonby/agentring)), and from ClawHub as `@mutonby/agentring`.
 
+## Self-hosting
+
+Everything on your own machines, free and without limits. You need:
+- somewhere to run the relay: a Linux server with Docker and a domain name, **or** your own
+  computer with Docker (the phone on the same Wi-Fi, or anywhere over Tailscale),
+- a free Firebase project, which is what makes a locked phone ring ([docs/firebase.md](docs/firebase.md)),
+- a key for the voice AI: Gemini ([free tier](https://aistudio.google.com/apikey)), or OpenAI,
+  xAI (Grok) or Phonic ([providers](docs/voice.md#providers)),
+- an Android phone.
+
+```bash
+# 1. The relay, on a server with a domain (ports 80, 443, UDP 50000-50100 and TCP 7881 open)
+cd deploy && cp .env.example .env && $EDITOR .env && docker compose up -d --build
+#    ... or on your own computer, at its LAN or Tailscale IP
+cd deploy && cp .env.local.example .env.local && $EDITOR .env.local \
+  && docker compose -f docker-compose.local.yml --env-file .env.local up -d --build
+docker compose logs relay | grep -A2 "API key"   # add the same -f/--env-file for the local one
+
+# 2. The computer where your agent runs
+uv tool install './daemon[voice]'
+agentring init --relay https://relay.example.com --api-key ak_...
+agentring pair                         # scan the QR code with the app
+agentring msg "hello"                  # the phone gets a notification
+echo GEMINI_API_KEY=... >> ~/.agentring/.env  # or OPENAI_API_KEY / XAI_API_KEY / PHONIC_API_KEY
+agentring call "Testing agentring" --ai       # + --provider openai|grok|phonic
+
+# 3. Your agent (Claude Code here; others: docs/agents.md)
+claude mcp add agentring -- agentring mcp
+```
+
+Install the app from **[Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app&referrer=utm_source%3Dgithub%26utm_medium%3Dreadme)**
+(recommended: it updates itself, and the same app works with agentring cloud and with your
+own relay). The APK on [Releases](https://github.com/mutonby/agentring/releases) is for
+those who'd rather not use Play; it's signed with a different key, so uninstall one before
+installing the other. The full
+tutorial, step by step for both options and with a troubleshooting table:
+**[docs/setup.md](docs/setup.md)**. If the phone doesn't ring when locked, it's usually the
+vendor's battery saver: [docs/troubleshooting-oem.md](docs/troubleshooting-oem.md).
+
 ## How it works
 
 ```
@@ -99,48 +155,10 @@ CLI and from MCP. How they compare (latency, tool use), how to measure them your
 More: [architecture](docs/architecture.md) · [protocol](docs/protocol.md) ·
 [voice AI](docs/voice.md)
 
-## Quickstart
-
-You need:
-- somewhere to run the relay: a Linux server with Docker and a domain name, **or** your own
-  computer with Docker (the phone on the same Wi-Fi, or anywhere over Tailscale),
-- a free Firebase project, which is what makes a locked phone ring ([docs/firebase.md](docs/firebase.md)),
-- a key for the voice AI: Gemini ([free tier](https://aistudio.google.com/apikey)), or OpenAI,
-  xAI (Grok) or Phonic ([providers](docs/voice.md#providers)),
-- an Android phone.
-
-```bash
-# 1. The relay, on a server with a domain (ports 80, 443, UDP 50000-50100 and TCP 7881 open)
-cd deploy && cp .env.example .env && $EDITOR .env && docker compose up -d --build
-#    ... or on your own computer, at its LAN or Tailscale IP
-cd deploy && cp .env.local.example .env.local && $EDITOR .env.local \
-  && docker compose -f docker-compose.local.yml --env-file .env.local up -d --build
-docker compose logs relay | grep -A2 "API key"   # add the same -f/--env-file for the local one
-
-# 2. The computer where your agent runs
-uv tool install './daemon[voice]'
-agentring init --relay https://relay.example.com --api-key ak_...
-agentring pair                         # scan the QR code with the app
-agentring msg "hello"                  # the phone gets a notification
-echo GEMINI_API_KEY=... >> ~/.agentring/.env  # or OPENAI_API_KEY / XAI_API_KEY / PHONIC_API_KEY
-agentring call "Testing agentring" --ai       # + --provider openai|grok|phonic
-
-# 3. Your agent (Claude Code here; others: docs/agents.md)
-claude mcp add agentring -- agentring mcp
-```
-
-Install the app from **[Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app)**
-(recommended: it updates itself, and the same app works with agentring cloud and with your
-own relay). The APK on [Releases](https://github.com/mutonby/agentring/releases) is for
-those who'd rather not use Play; it's signed with a different key, so uninstall one before
-installing the other. The full
-tutorial, step by step for both options and with a troubleshooting table:
-**[docs/setup.md](docs/setup.md)**. If the phone doesn't ring when locked, it's usually the
-vendor's battery saver: [docs/troubleshooting-oem.md](docs/troubleshooting-oem.md).
-
 ## Privacy and security
 
-Everything runs on your own servers and accounts. Messages and call metadata are stored
+Self-hosted, everything runs on your own servers and accounts (for the hosted version,
+see its [privacy policy](https://agentring.io/privacy)). Messages and call metadata are stored
 on your relay. Push notifications go through your own Firebase project; they are
 signed, not encrypted, so Google's FCM can read pushed text. Call audio goes through
 your LiveKit server and, with the voice AI, to the provider you chose (Google, OpenAI,
@@ -155,7 +173,11 @@ agents you'd trust someone holding your phone with. Details and the threat model
 - Android only (no iOS yet). Android Auto is in beta and only in the APK from Releases:
   Google Play doesn't allow calling apps for cars in production yet
   ([docs/android-auto.md](docs/android-auto.md)).
-- One user per relay: no accounts.
+- It's a young project. The app is on Google Play, and we test it most on a Pixel 6
+  (Android 16); other vendors' battery savers can hold a call back
+  ([docs/troubleshooting-oem.md](docs/troubleshooting-oem.md)). If it misbehaves on your
+  phone, please open an issue.
+- Self-hosted, one user per relay: no accounts.
 - The voice AI works best with a cloud realtime model (Gemini, OpenAI, Grok or Phonic). A local
   one runs on your own machine (`--provider local`), but it's experimental and slower; others
   plug in through [`RealtimeBackend`](docs/voice.md#backends).
