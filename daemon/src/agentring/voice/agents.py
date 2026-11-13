@@ -34,6 +34,7 @@ import yaml
 from .tools import Tool, current_session
 
 log = logging.getLogger("agentring.voice.agents")
+MAX_MESSAGE_CHARS = 4000  # the relay rejects longer messages (POST /v1/messages)
 
 TASK = "{task}"
 TASK_PREFIX = "Task: "  # keeps a task that starts with "-" from being parsed as an option
@@ -229,6 +230,16 @@ class Consultations:
         return Tool("consult_agent", self.prompts.description.format(agents=agents), self.consult, schema,
                     timeout_s=self.answer_within_s + 30)
 
+    def _message(self, agent: str, task: str, answer: str) -> str:
+        """The after-call message, within the relay's limit: the answer keeps its end, like `_clip`."""
+        msg = self.prompts.message.format(agent=agent, task=task, answer=answer)
+        if len(msg) <= MAX_MESSAGE_CHARS:
+            return msg
+        room = MAX_MESSAGE_CHARS - len(self.prompts.message.format(agent=agent, task=task, answer="…"))
+        if room <= 0:  # a task too long to quote leaves no room: just cut
+            return msg[:MAX_MESSAGE_CHARS]
+        return self.prompts.message.format(agent=agent, task=task, answer="…" + answer[-room:])
+
     def _clip(self, text: str) -> str:
         text = text.strip() or "(no output)"
         return text if len(text) <= self.max_answer_chars else "…" + text[-self.max_answer_chars:]
@@ -281,7 +292,7 @@ class Consultations:
         elif ok and session.relay is not None and session.info.device_ids is None:
             # The call is over: the answer goes to the phone as a message. Not after a targeted
             # call: messages have no audience, every paired phone would read what it was private from.
-            msg = self.prompts.message.format(agent=agent, task=task, answer=text)
+            msg = self._message(agent, task, text)
             try:
                 await asyncio.to_thread(session.relay.post_message, msg)
             except Exception as e:
