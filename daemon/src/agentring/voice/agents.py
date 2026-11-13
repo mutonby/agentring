@@ -259,14 +259,16 @@ class Consultations:
         return self.prompts.working.format(agent=agent, task=task)
 
     async def _ask(self, a: CommandAgent, task: str, session: Any) -> tuple[bool, str]:
-        log.info("asking %s: %s", a.name, task[:200])
+        log.info("asking %s", a.name)
+        log.debug("task for %s: %s", a.name, task[:200])  # what was asked stays out of production logs
         try:
             ok, text = True, self._clip(await a.ask(task, call_id=session.info.call_id if session else None))
         except Exception as e:
             ok, text = False, str(e)[:500]
         finally:
             self._busy.pop(a.name, None)
-        log.info("%s %s: %s", a.name, "answered" if ok else "failed", text[:200])
+        log.info("%s %s (%d chars)", a.name, "answered" if ok else "failed", len(text))
+        log.debug("%s: %s", a.name, text[:200])
         return ok, text
 
     async def _deliver_later(self, job: asyncio.Task, session: Any, agent: str, task: str) -> None:
