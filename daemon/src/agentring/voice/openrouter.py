@@ -26,6 +26,7 @@ import io
 import json
 import logging
 import re
+import time
 import wave
 from collections.abc import AsyncIterator
 from typing import Any
@@ -63,7 +64,7 @@ class EnergyVAD:
     end with ("discard", None).
     """
 
-    def __init__(self, rate: int, *, frame_ms: int = 20, start_ms: int = 80, end_ms: int = 550,
+    def __init__(self, rate: int, *, frame_ms: int = 20, start_ms: int = 80, end_ms: int = 450,
                  preroll_ms: int = 300, min_speech_ms: int = 250, barge_ms: int = 300, min_rms: float = 350.0,
                  ratio: float = 3.0, max_utterance_s: float = 30.0):
         self.rate = rate
@@ -171,7 +172,8 @@ class OpenRouterVoice:
 
     def __init__(self, api_key: str, *, model: str = DEFAULT_MODEL, voice: str | None = DEFAULT_VOICE,
                  language: str | None = None, stt_model: str = DEFAULT_STT, tts_model: str = DEFAULT_TTS,
-                 base_url: str = OPENROUTER_URL, zdr: bool = False, vad: EnergyVAD | None = None,
+                 base_url: str = OPENROUTER_URL, zdr: bool = False, provider: dict[str, Any] | None = None,
+                 vad: EnergyVAD | None = None,
                  extra_body: dict[str, Any] | None = None, client: httpx.AsyncClient | None = None):
         if not api_key:
             raise ValueError("OpenRouterVoice needs an API key")
@@ -180,6 +182,7 @@ class OpenRouterVoice:
         self.stt_model, self.tts_model = stt_model, tts_model
         self.base_url = base_url.rstrip("/")
         self.zdr = zdr
+        self.provider = provider or {}  # OpenRouter provider routing, e.g. {"sort": "latency"}
         self.extra_body = extra_body or {}
         self.vad = vad or EnergyVAD(self.input_rate)
         self._client = client
@@ -192,6 +195,7 @@ class OpenRouterVoice:
         self._pending_tools: dict[str, ToolCall] = {}  # asked for, results not back yet
         self._tasks: set[asyncio.Task[Any]] = set()
         self._closed = False
+        self._t_end = 0.0  # when the caller stopped talking (for the timing log)
         self._cut = False  # a reply was cancelled by speech that hasn't been transcribed yet
 
     # ------------------------------------------------------------ RealtimeBackend
@@ -275,8 +279,10 @@ class OpenRouterVoice:
         self._reply = self._spawn(self._reply_turn())
 
     async def _on_utterance(self, pcm: bytes) -> None:
+        self._t_end = time.monotonic()
         try:
             text = (await self.transcribe(pcm)).strip()
+            log.info("timing: speech-to-text %.2f s", time.monotonic() - self._t_end)
         except Exception as e:
             log.warning("transcription failed: %s", str(e)[:300])
             text = ""
@@ -317,6 +323,7 @@ class OpenRouterVoice:
         partial: dict[int, dict[str, Any]] = {}
         sentences: asyncio.Queue[str | None] = asyncio.Queue()
         speaker = asyncio.create_task(self._speak(sentences, spoken))
+        t0, first, queued = time.monotonic(), True, False
         try:
             assert self._client is not None
             async with self._client.stream("POST", f"{self.base_url}/chat/completions", json=body) as r:
@@ -336,11 +343,18 @@ class OpenRouterVoice:
                         raise RuntimeError(f"chat error: {str(chunk['error'])[:300]}")
                     for choice in chunk.get("choices") or []:
                         delta = choice.get("delta") or {}
+                        if first and (delta.get("content") or delta.get("tool_calls")):
+                            first = False
+                            log.info("timing: model first token %.2f s (%s)", time.monotonic() - t0,
+                                     "tool" if delta.get("tool_calls") else "text")
                         if delta.get("content"):
                             text += delta["content"]
-                            done, rest = split_sentences(rest + delta["content"])
+                            # The first sentence goes out as soon as it is whole, however short
+                            # ("Vale, lo miro."): it is what the caller waits for.
+                            done, rest = split_sentences(rest + delta["content"], 12 if queued else 2)
                             for s in done:
                                 sentences.put_nowait(s)
+                                queued = True
                         for tc in delta.get("tool_calls") or []:
                             p = partial.setdefault(tc.get("index", 0), {"id": None, "name": "", "args": ""})
                             p["id"] = tc.get("id") or p["id"]
@@ -373,6 +387,8 @@ class OpenRouterVoice:
 
     async def _speak(self, sentences: asyncio.Queue[str | None], spoken: list[str]) -> None:
         while (s := await sentences.get()) is not None:
+            if not spoken and self._t_end:
+                log.info("timing: first sentence ready %.2f s after the caller stopped", time.monotonic() - self._t_end)
             await self.synthesize(s)
             spoken.append(s)
             self._events.put_nowait(Transcript("agent", s + " "))
@@ -380,8 +396,11 @@ class OpenRouterVoice:
     # ------------------------------------------------------------ HTTP pieces
 
     def _add_policy(self, body: dict[str, Any]) -> None:
+        prefs = {**self.provider, **body.get("provider", {})}
         if self.zdr:
-            body["provider"] = {**body.get("provider", {}), "zdr": True, "data_collection": "deny"}
+            prefs.update(zdr=True, data_collection="deny")
+        if prefs:
+            body["provider"] = prefs
 
     async def transcribe(self, pcm: bytes) -> str:
         body: dict[str, Any] = {"model": self.stt_model, "input_audio": {
@@ -407,6 +426,9 @@ class OpenRouterVoice:
             if rate and int(rate.group(1)) != self.output_rate:
                 raise RuntimeError(f"speech came at {rate.group(1)} Hz, expected {self.output_rate}")
             odd = b""
+            if self._t_end:
+                log.info("timing: first audio %.2f s after the caller stopped", time.monotonic() - self._t_end)
+                self._t_end = 0.0
             async for chunk in r.aiter_bytes():
                 chunk = odd + chunk
                 cut = len(chunk) - len(chunk) % 2  # whole 16-bit samples only

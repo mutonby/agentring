@@ -269,7 +269,7 @@ def test_untrusted_notes_are_fenced():
 
 def test_resolve_openrouter(agentring_home, monkeypatch):
     for k in ("AGENTRING_VOICE_PROVIDER", "AGENTRING_VOICE_MODEL", "AGENTRING_VOICE_NAME", "OPENROUTER_API_KEY", "AGENTRING_OPENROUTER_ZDR",
-              "AGENTRING_OPENROUTER_STT_MODEL", "AGENTRING_OPENROUTER_BASE_URL", "AGENTRING_VOICE_LANGUAGE"):
+              "AGENTRING_OPENROUTER_STT_MODEL", "AGENTRING_OPENROUTER_BASE_URL", "AGENTRING_OPENROUTER_PROVIDER", "AGENTRING_VOICE_LANGUAGE"):
         monkeypatch.delenv(k, raising=False)
     with pytest.raises(VoiceConfigError, match="OPENROUTER_API_KEY"):
         resolve_voice("openrouter")
@@ -281,6 +281,16 @@ def test_resolve_openrouter(agentring_home, monkeypatch):
     assert isinstance(b, OpenRouterVoice)
     assert (b.model, b.voice, b.language, b.zdr, b.stt_model) == (
         "z-ai/glm-5.3-flash", "voice_483", "es", True, "openai/whisper-large-v3-turbo")
+    monkeypatch.setenv("AGENTRING_OPENROUTER_PROVIDER", '{"sort": "latency"}')
+    b = resolve_voice("openrouter").factory()()
+    assert b.provider == {"sort": "latency"}
+    body: dict = {}
+    b._add_policy(body)
+    assert body["provider"] == {"sort": "latency", "zdr": True, "data_collection": "deny"}
+    monkeypatch.setenv("AGENTRING_OPENROUTER_PROVIDER", "latency")
+    with pytest.raises(VoiceConfigError, match="JSON"):
+        resolve_voice("openrouter").factory()
+    monkeypatch.delenv("AGENTRING_OPENROUTER_PROVIDER")
     monkeypatch.setenv("AGENTRING_OPENROUTER_BASE_URL", "ftp://nope")
     with pytest.raises(VoiceConfigError, match="BASE_URL"):
         resolve_voice("openrouter").factory()

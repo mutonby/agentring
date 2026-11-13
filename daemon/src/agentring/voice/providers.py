@@ -17,12 +17,15 @@ server asks for one. The model is whatever that server runs; agentring doesn't p
 `openrouter` chains three HTTP calls on OpenRouter with OPENROUTER_API_KEY: speech-to-text,
 a chat model (AGENTRING_VOICE_MODEL, any model on OpenRouter) and text-to-speech
 (AGENTRING_VOICE_NAME is the TTS voice). AGENTRING_OPENROUTER_STT_MODEL and
-AGENTRING_OPENROUTER_TTS_MODEL pick the speech models, AGENTRING_OPENROUTER_ZDR=1 routes
+AGENTRING_OPENROUTER_TTS_MODEL pick the speech models, AGENTRING_OPENROUTER_PROVIDER is
+OpenRouter provider routing as JSON (e.g. {"sort": "latency"}), AGENTRING_OPENROUTER_ZDR=1 routes
 every request only to zero-data-retention endpoints, and AGENTRING_OPENROUTER_BASE_URL points
 the cascade at another server with the same OpenAI-compatible endpoints.
 """
 
 from __future__ import annotations
+
+import json
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -87,6 +90,14 @@ def openrouter_settings() -> dict[str, Any]:
                      ("AGENTRING_OPENROUTER_BASE_URL", "base_url")):
         if value := secret(env):
             kw[arg] = value
+    if raw := secret("AGENTRING_OPENROUTER_PROVIDER"):
+        try:
+            prefs = json.loads(raw)
+        except ValueError:
+            raise VoiceConfigError("AGENTRING_OPENROUTER_PROVIDER must be a JSON object, e.g. {\"sort\": \"latency\"}") from None
+        if not isinstance(prefs, dict):
+            raise VoiceConfigError("AGENTRING_OPENROUTER_PROVIDER must be a JSON object")
+        kw["provider"] = prefs
     base = kw.get("base_url", "")
     if base and not base.startswith(("http://", "https://")):
         raise VoiceConfigError(f"AGENTRING_OPENROUTER_BASE_URL must start with http:// or https://, not {base!r}")
