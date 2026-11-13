@@ -500,6 +500,21 @@ def test_build_agent_passes_before_tool(monkeypatch):
     assert asyncio.run(quick.build_agent(choice)).agent.before_tool is None  # `call --ai`, `serve --ai`: unchanged
 
 
+def test_instructions_file_is_read_at_every_call(tmp_path):
+    from agentring.voice import quick
+
+    f = tmp_path / "ins.md"
+    f.write_text("first", encoding="utf-8")
+    choice = type("Choice", (), {"factory": lambda self: _NullBackend})()
+    ins = asyncio.run(quick.build_agent(choice, instructions=f"@{f}")).agent.instructions
+    assert ins(None) == "first"
+    f.write_text("second", encoding="utf-8")  # edited while `serve` runs
+    assert ins(None) == "second"
+    f.unlink()
+    assert ins(None) == "second"  # can't read it: the last ones
+    assert asyncio.run(quick.build_agent(choice, instructions="inline")).agent.instructions == "inline"
+
+
 def test_instructions_ask_to_talk_before_tools():
     from agentring.voice import Prompts
 

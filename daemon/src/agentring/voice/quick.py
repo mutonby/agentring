@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +12,8 @@ from .agents import AgentsConfig, Consultations
 from .providers import PROVIDERS, VoiceChoice
 from .session import BeforeTool, CallSession, VoiceAgent
 from .tools import McpClient, Tool, ToolCall, mcp_tools
+
+log = logging.getLogger(__name__)
 
 DEFAULT_INSTRUCTIONS = (
     "You are the user's AI agent talking to them on the phone. Speak like a person on a call: short, "
@@ -43,6 +47,24 @@ def read_instructions(value: str | None) -> str:
     if value.startswith("@"):
         return Path(value[1:]).expanduser().read_text(encoding="utf-8")
     return value
+
+
+def _reread(value: str | None, text: str) -> str | Callable[[object], str]:
+    """@path is read again at every call, so a long-running `serve` picks up edits (or a file that
+    another program keeps up to date) without a restart. If it can't be read, the last text is used."""
+    if not value or not value.startswith("@"):
+        return text
+    path = Path(value[1:]).expanduser()
+    last = [text]
+
+    def current(_info: object) -> str:
+        try:
+            last[0] = path.read_text(encoding="utf-8")
+        except OSError as e:
+            log.warning("cannot read the instructions again (%s); using the last ones", e)
+        return last[0]
+
+    return current
 
 
 @dataclass
@@ -96,5 +118,5 @@ async def build_agent(
         built.consultations = Consultations(agents.agents)
         tools.append(built.consultations.tool())
     text = read_instructions(instructions)
-    built.agent = VoiceAgent(voice_ai.factory(), text, tools, before_tool=before_tool)
+    built.agent = VoiceAgent(voice_ai.factory(), _reread(instructions, text), tools, before_tool=before_tool)
     return built
