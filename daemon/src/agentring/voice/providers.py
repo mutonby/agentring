@@ -13,6 +13,13 @@ and Grok use it to transcribe the user; Gemini follows the instructions).
 speech-to-speech in front of a small model on llama.cpp): AGENTRING_VOICE_URL says where
 (default ws://127.0.0.1:8765/v1/realtime), and AGENTRING_VOICE_KEY is only needed if the
 server asks for one. The model is whatever that server runs; agentring doesn't pick it.
+
+`openrouter` chains three HTTP calls on OpenRouter with OPENROUTER_API_KEY: speech-to-text,
+a chat model (AGENTRING_VOICE_MODEL, any model on OpenRouter) and text-to-speech
+(AGENTRING_VOICE_NAME is the TTS voice). AGENTRING_OPENROUTER_STT_MODEL and
+AGENTRING_OPENROUTER_TTS_MODEL pick the speech models, AGENTRING_OPENROUTER_ZDR=1 routes
+every request only to zero-data-retention endpoints, and AGENTRING_OPENROUTER_BASE_URL points
+the cascade at another server with the same OpenAI-compatible endpoints.
 """
 
 from __future__ import annotations
@@ -50,6 +57,9 @@ class Provider:
         if self.name == "local":
             from .openai_realtime import LocalRealtime
             return LocalRealtime
+        if self.name == "openrouter":
+            from .openrouter import OpenRouterVoice
+            return OpenRouterVoice
         from .phonic import Phonic
         return Phonic
 
@@ -61,7 +71,26 @@ PROVIDERS = {p.name: p for p in (
     Provider("phonic", "Phonic", "PHONIC_API_KEY", "phonic-1", None),
     Provider("local", "Local (OpenAI Realtime compatible)", "AGENTRING_VOICE_KEY", "local", None,
              takes_language=False, key_required=False, default_url="ws://127.0.0.1:8765/v1/realtime"),
+    Provider("openrouter", "OpenRouter (speech-to-text, model, text-to-speech)", "OPENROUTER_API_KEY",
+             "anthropic/claude-haiku-5.5", "voice_478"),
 )}
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def openrouter_settings() -> dict[str, Any]:
+    """The `openrouter` cascade's own settings (environment or ~/.agentring/.env)."""
+    kw: dict[str, Any] = {"zdr": _truthy(secret("AGENTRING_OPENROUTER_ZDR"))}
+    for env, arg in (("AGENTRING_OPENROUTER_STT_MODEL", "stt_model"), ("AGENTRING_OPENROUTER_TTS_MODEL", "tts_model"),
+                     ("AGENTRING_OPENROUTER_BASE_URL", "base_url")):
+        if value := secret(env):
+            kw[arg] = value
+    base = kw.get("base_url", "")
+    if base and not base.startswith(("http://", "https://")):
+        raise VoiceConfigError(f"AGENTRING_OPENROUTER_BASE_URL must start with http:// or https://, not {base!r}")
+    return kw
 
 
 class VoiceConfigError(ValueError):
@@ -87,6 +116,8 @@ class VoiceChoice:
             kw["voice"] = self.voice
         if self.language and self.provider.takes_language:
             kw["language"] = self.language
+        if self.provider.name == "openrouter":
+            kw.update(openrouter_settings())
         return lambda: cls(self.api_key, **kw)
 
 

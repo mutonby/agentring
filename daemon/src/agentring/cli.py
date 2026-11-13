@@ -38,9 +38,10 @@ JsonOpt = Annotated[bool, typer.Option("--json", help="Machine-readable JSON out
 AiOpt = Annotated[bool, typer.Option("--ai", help="A voice AI talks on the call (default Gemini Live; see --provider).")]
 ProviderOpt = Annotated[
     Optional[str],
-    typer.Option("--provider", help="--ai: voice provider: gemini, openai, grok, phonic or local (default "
+    typer.Option("--provider", help="--ai: voice provider: gemini, openai, grok, phonic, openrouter or local (default "
                  "AGENTRING_VOICE_PROVIDER, else gemini). Each needs its key: GEMINI_API_KEY, OPENAI_API_KEY, "
-                 "XAI_API_KEY, PHONIC_API_KEY; local needs a server at AGENTRING_VOICE_URL (docs/voice.md)."),
+                 "XAI_API_KEY, PHONIC_API_KEY, OPENROUTER_API_KEY; local needs a server at AGENTRING_VOICE_URL "
+                 "(docs/voice.md)."),
 ]
 InstructionsOpt = Annotated[
     Optional[str], typer.Option("--instructions", help="--ai: system prompt, or @file to read it from a file.")
@@ -621,8 +622,8 @@ def agents_ask(
 
 @voice_app.command("bench")
 def voice_bench(
-    provider: Annotated[Optional[str], typer.Option("--provider", help="gemini, openai, grok, phonic or local "
-                                                    "(default AGENTRING_VOICE_PROVIDER, else gemini).")] = None,
+    provider: Annotated[Optional[str], typer.Option("--provider", help="gemini, openai, grok, phonic, openrouter "
+                                                    "or local (default AGENTRING_VOICE_PROVIDER, else gemini).")] = None,
     model: Annotated[Optional[str], typer.Option("--model", help="The provider's model (default AGENTRING_VOICE_MODEL, "
                                                  "else the provider's default).")] = None,
     voice: Annotated[Optional[str], typer.Option("--voice", help="The provider's voice.")] = None,

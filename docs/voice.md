@@ -107,6 +107,7 @@ connection), the relay says it is over, or the model's session limit is near
 | `grok` | xAI Grok Voice (`grok-voice-latest`) | xAI's default | `XAI_API_KEY` | `GrokVoice` (voice/openai_realtime.py) |
 | `phonic` | Phonic (`phonic-1`) | Phonic's default | `PHONIC_API_KEY` | `Phonic` (voice/phonic.py) |
 | `local` | whatever your server runs | your server's | none (`AGENTRING_VOICE_KEY` if it asks for one) | `LocalRealtime` (voice/openai_realtime.py) |
+| `openrouter` | any chat model on OpenRouter (`anthropic/claude-haiku-5.5`), with speech-to-text and text-to-speech models in front and behind | `voice_478` (Voxtral 3) | `OPENROUTER_API_KEY` | `OpenRouterVoice` (voice/openrouter.py) |
 
 The CLI (`call --ai`, `serve --ai`) and the MCP `call` tool resolve the provider the
 same way: `--provider`/`--model`/`--voice` if given, else `AGENTRING_VOICE_PROVIDER`,
@@ -115,6 +116,36 @@ else the defaults above. In code: `resolve_voice("grok").factory()` is what `Voi
 takes. `AGENTRING_VOICE_LANGUAGE` (e.g. `es`) is the language Phonic speaks before it has
 heard anyone (otherwise English) and a hint for OpenAI's and Grok's transcription of the
 user; Gemini follows the instructions.
+
+### OpenRouter (speech-to-text → any model → text-to-speech)
+
+OpenRouter has no realtime speech-to-speech API, but it serves the three pieces over HTTP
+with one key, so `openrouter` chains them: the caller's audio is cut into utterances by a
+small voice activity detector, transcribed (`/audio/transcriptions`), answered by any chat
+model with your tools (`/chat/completions`, streamed) and spoken sentence by sentence
+(`/audio/speech`, streamed PCM) while the model is still writing. Talking over the agent
+interrupts it. That lets you pick the model that thinks on the call (and pay per token, not
+per audio minute), at the cost of some latency: about 2.5-3 s to the first word with
+`anthropic/claude-haiku-5.5`, against 1.2-1.6 s for the realtime models below.
+
+```bash
+OPENROUTER_API_KEY=sk-or-...
+AGENTRING_VOICE_PROVIDER=openrouter
+AGENTRING_VOICE_MODEL=anthropic/claude-haiku-5.5           # any chat model with tool calling
+AGENTRING_VOICE_NAME=voice_483                             # a TTS voice (voice_483: Voxtral 3, Spanish)
+AGENTRING_VOICE_LANGUAGE=es                                # hint for the transcription
+AGENTRING_OPENROUTER_STT_MODEL=mistralai/voxtral-mini-transcribe-3-0   # default
+AGENTRING_OPENROUTER_TTS_MODEL=mistralai/voxtral-mini-tts-3-0          # default
+AGENTRING_OPENROUTER_ZDR=1            # optional: only zero-data-retention endpoints, for all three
+AGENTRING_OPENROUTER_BASE_URL=...     # optional: another server with the same OpenAI-compatible endpoints
+```
+
+With `AGENTRING_OPENROUTER_ZDR=1` every request carries `provider: {zdr: true,
+data_collection: "deny"}`, so OpenRouter only routes to endpoints that keep nothing, and
+fails rather than fall back to one that does. Measured with `agentring voice bench
+--provider openrouter --lang es --runs 2` on 2026-11-13 (Haiku 5.5, Voxtral STT and TTS):
+first audio 2.5-3.3 s, right tools 6-7/8 (it sometimes answers the "ask an agent" prompt itself
+instead of calling `consult_agent`), spoke before a tool 4-6/6.
 
 How they compare, measured on 2026-10-30 with the same four Spanish prompts streamed in
 real time, 3 sessions each (chat, a quick tool, two chained tools, a 3 s tool). Time is
@@ -134,7 +165,7 @@ Realtime was not part of that run. Write-up with charts: https://agentring.io/bl
 To compare providers yourself, on your machine and with your network, run the same test:
 
 ```bash
-agentring voice bench --provider grok --lang es      # or gemini, openai, phonic, local
+agentring voice bench --provider grok --lang es      # or gemini, openai, phonic, openrouter, local
 agentring voice bench --provider local --runs 5 --out ./bench-local   # keeps each session's audio
 ```
 

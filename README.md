@@ -89,7 +89,7 @@ Everything on your own machines, free and without limits. You need:
   computer with Docker (the phone on the same Wi-Fi, or anywhere over Tailscale),
 - a free Firebase project, which is what makes a locked phone ring ([docs/firebase.md](docs/firebase.md)),
 - a key for the voice AI: Gemini ([free tier](https://aistudio.google.com/apikey)), or OpenAI,
-  xAI (Grok) or Phonic ([providers](docs/voice.md#providers)),
+  xAI (Grok), Phonic or OpenRouter ([providers](docs/voice.md#providers)),
 - an Android phone.
 
 ```bash
@@ -145,6 +145,7 @@ the conversation and hands real work to your agents. Pick the one you like:
 | [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) | `openai` | `OPENAI_API_KEY` |
 | [Grok Voice](https://docs.x.ai/docs/guides/voice/agent) (xAI) | `grok` | `XAI_API_KEY` |
 | [Phonic](https://docs.phonic.ai) | `phonic` | `PHONIC_API_KEY` |
+| [OpenRouter](https://openrouter.ai): speech-to-text, any chat model, text-to-speech ([details](docs/voice.md#openrouter-speech-to-text--any-model--text-to-speech)) | `openrouter` | `OPENROUTER_API_KEY` |
 | Your own server, e.g. [HF speech-to-speech](https://github.com/huggingface/speech-to-speech) + a small model on llama.cpp (experimental) | `local` | none |
 
 Set `AGENTRING_VOICE_PROVIDER` in `~/.agentring/.env` to use one for every call, from the
