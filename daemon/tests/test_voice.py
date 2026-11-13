@@ -133,7 +133,12 @@ class _Mcp(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("mcp-session-id", "s1")
         if self.sse:
-            data = f"event: message\ndata: {body}\n\n".encode()
+            # A log notification first, then the response, as the Python MCP SDK streams them;
+            # sse-starlette (under the SDK) ends lines with \r\n.
+            note = json.dumps({"jsonrpc": "2.0", "method": "notifications/message",
+                               "params": {"level": "info", "data": "working"}})
+            nl = "\r\n" if self.sse == "crlf" else "\n"
+            data = (f"event: message{nl}data: {note}{nl}{nl}event: message{nl}data: {body}{nl}{nl}").encode()
             self.send_header("content-type", "text/event-stream")
         else:
             data = body.encode()
@@ -143,7 +148,7 @@ class _Mcp(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-@pytest.mark.parametrize("sse", [False, True])
+@pytest.mark.parametrize("sse", [False, "lf", "crlf"])
 def test_mcp_tools(sse):
     handler = type("H", (_Mcp,), {"sse": sse})
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
