@@ -171,6 +171,25 @@ def test_answer_after_the_call_goes_to_the_phone_as_a_message():
     assert len(messages) == 1 and "after the call" in messages[0] and "late backup" in messages[0]
 
 
+def test_a_long_answer_after_the_call_fits_in_a_message():
+    """The relay takes up to 4000 characters; the answer is clipped to 4000 before the header is added."""
+    long_answer = [PY, "-c", "print('x' * 5000 + ' END')"]
+
+    async def run():
+        relay = _FakeRelay()
+        c = Consultations([CommandAgent("big", "Big.", long_answer)], answer_within_s=0)
+        s = _FakeSession(relay)
+        _session.set(s)
+        await c.consult("big", "a task " * 50)
+        s.done.set()
+        await c.drain(5)
+        return relay.messages
+
+    messages = asyncio.run(run())
+    assert len(messages) == 1 and len(messages[0]) <= 4000
+    assert messages[0].startswith("big answered") and messages[0].endswith("END")
+
+
 def test_answer_after_a_targeted_call_goes_to_no_phone():
     """A message reaches every paired phone; the call was private to some of them."""
     async def run():
