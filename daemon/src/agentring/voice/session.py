@@ -342,7 +342,8 @@ class CallSession:
             log.warning("could not return %s: %s", [r.call.name for r in results], e)
 
     async def run_tool(self, call: ToolCall) -> str:
-        log.info("tool %s %s", call.name, str(call.args)[:200])
+        log.info("tool %s", call.name)
+        log.debug("tool %s args %s", call.name, str(call.args)[:200])  # arguments can quote the user
         skipped = False
         if call.name == END_CALL and self.agent.end_call_tool:
             self.hang_up()

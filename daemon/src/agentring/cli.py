@@ -746,7 +746,7 @@ def _describe(event: dict[str, Any]) -> str | None:
     t = event.get("type")
     if t == "msg.new":
         who = "you" if event["from"] == "agent" else "user"
-        return f"msg.new from {who}: {event['text']}"
+        return f"msg.new {event.get('msg_id', '')} from {who} ({len(event.get('text') or '')} chars)"
     if t == "msg.read":
         return f"msg.read {event['msg_id']} by {event['by']}"
     if t == "ws.hello":
@@ -792,6 +792,8 @@ def serve(
         d = _describe(e)
         if d:
             log.info(d)
+        if e.get("type") == "msg.new":
+            log.debug("msg.new text: %s", e.get("text"))  # message text stays out of production logs
         if voice_agent is not None and stop is not None and e.get("type") == "call.invite":
             from .voice import is_incoming_call
 
