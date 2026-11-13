@@ -20,6 +20,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -66,6 +67,9 @@ class Prompts:
     # which on a phone sounds like the line dropped. "" leaves the instructions as they are.
     before_tools: str = ("Before you call a tool, say a few words first so the line is never silent (for example "
                          "\"let me check\"), then call it. Never answer from memory what a tool should tell you.")
+    # Added to the instructions at the start of every call: voice models don't know the date or the
+    # time, and "what do I have today?" or "move it to Monday" need them. "" leaves them out.
+    now: str = "It is now {now} (local time on the agent's computer)."
     someone: str = "the user"
     joiner: str = " and "
 
@@ -393,6 +397,9 @@ class CallSession:
     async def _instructions(self) -> str:
         ins = self.agent.instructions
         text = await _maybe_await(ins(self.info)) if callable(ins) else ins
+        if self.prompts.now:
+            now = datetime.now().astimezone()
+            text = f"{text.rstrip()}\n\n" + self.prompts.now.format(now=now.strftime("%A %Y-%m-%d %H:%M %Z"))
         if self.tools and self.prompts.before_tools:
             text = f"{text.rstrip()}\n\n{self.prompts.before_tools}"
         return text
