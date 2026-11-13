@@ -87,8 +87,8 @@ def test_vad_cuts_utterances_and_drops_clicks():
     vad = EnergyVAD(RATE)
     assert vad.feed(silence(500)) == []
     evs = vad.feed(tone(600)) + vad.feed(silence(800))
-    assert [k for k, _ in evs] == ["start", "end"]
-    pcm = evs[1][1]
+    assert [k for k, _ in evs] == ["start", "barge", "end"]
+    pcm = evs[2][1]
     assert pcm and len(pcm) >= len(tone(600))  # the utterance, with some preroll
     click = vad.feed(tone(100)) + vad.feed(silence(800))
     assert [k for k, _ in click] == ["start", "discard"]
@@ -99,7 +99,7 @@ def test_vad_adapts_to_a_noisy_room():
     assert vad.feed(tone(2000, amp=400)) == []  # steady hum: becomes the floor, not speech
     assert vad.threshold() > vad.min_rms  # ... and raises the bar for speech
     evs = vad.feed(tone(600, amp=8000)) + vad.feed(tone(800, amp=400))
-    assert [k for k, _ in evs] == ["start", "end"]
+    assert [k for k, _ in evs] == ["start", "barge", "end"]
 
 
 def test_split_sentences():
@@ -220,10 +220,34 @@ def test_speech_over_the_agent_interrupts_the_reply():
         await b.connect("x", [])
         await b.send_text("Hola.", respond=True)
         await asyncio.wait_for(started.wait(), 2)
-        await b.send_audio(tone(200))  # speech starts
+        await b.send_audio(tone(400))  # someone talks for 400 ms: a real interruption
         evs = await collect_until(b, 1)
         await b.close()
         assert [type(e) for e in evs] == [Interrupted, TurnComplete]
+
+    asyncio.run(main())
+
+
+def test_a_knock_does_not_interrupt_and_noise_gets_the_answer_again():
+    """A short sound doesn't cut the agent; speech that transcribes to nothing makes it answer again."""
+    async def main() -> None:
+        fake = FakeOpenRouter([text_chunks("Este mes has facturado 4.200 euros.")] * 3, heard="")
+        b = backend(fake)
+        await b.connect("x", [])
+        await b.send_audio(tone(120) + silence(800))  # a knock: start, then discarded, no interruption
+        await b.send_text("¿Cuánto he facturado?", respond=True)
+        evs = await collect_until(b, 1)
+        assert not any(isinstance(e, Interrupted) for e in evs)
+
+        b.vad = EnergyVAD(RATE)
+        await b.send_text("¿Y el mes pasado?", respond=True)
+        await asyncio.sleep(0)  # the reply is on its way…
+        await b.send_audio(tone(500) + silence(800))  # …and background talk cuts it; it transcribes to ""
+        evs = await collect_until(b, 2)
+        await b.close()
+        assert sum(isinstance(e, Interrupted) for e in evs) == 1
+        said = "".join(e.text for e in evs if isinstance(e, Transcript) and e.role == "agent")
+        assert "4.200" in said  # answered after all
 
     asyncio.run(main())
 

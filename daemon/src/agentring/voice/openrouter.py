@@ -55,15 +55,17 @@ _SENTENCE_END = re.compile(r"[.!?…:;](?=\s)|\n")
 class EnergyVAD:
     """Cuts PCM16 mono into utterances by loudness, against an adaptive noise floor.
 
-    `feed` returns ("start", None) when speech begins (after `start_ms` of it) and
-    ("end", pcm) when it has been quiet for `end_ms`, with the utterance (plus `preroll_ms`
-    from before the start, so the first syllable isn't lost). Utterances shorter than
-    `min_speech_ms` of speech (a cough, a click) end with ("discard", None).
+    `feed` returns ("start", None) when speech begins (after `start_ms` of it), ("barge", None)
+    once it has lasted `barge_ms` (long enough to be someone talking, not a knock or a word in
+    the background: the moment to interrupt the agent), and ("end", pcm) when it has been quiet
+    for `end_ms`, with the utterance (plus `preroll_ms` from before the start, so the first
+    syllable isn't lost). Utterances shorter than `min_speech_ms` of speech (a cough, a click)
+    end with ("discard", None).
     """
 
     def __init__(self, rate: int, *, frame_ms: int = 20, start_ms: int = 80, end_ms: int = 550,
-                 preroll_ms: int = 300, min_speech_ms: int = 250, min_rms: float = 350.0, ratio: float = 3.0,
-                 max_utterance_s: float = 30.0):
+                 preroll_ms: int = 300, min_speech_ms: int = 250, barge_ms: int = 300, min_rms: float = 350.0,
+                 ratio: float = 3.0, max_utterance_s: float = 30.0):
         self.rate = rate
         self.frame = rate * frame_ms // 1000 * 2  # bytes
         self.frame_ms = frame_ms
@@ -71,6 +73,8 @@ class EnergyVAD:
         self.end_frames = max(1, end_ms // frame_ms)
         self.preroll_frames = preroll_ms // frame_ms
         self.min_speech_frames = max(1, min_speech_ms // frame_ms)
+        self.barge_frames = max(1, barge_ms // frame_ms)
+        self._barged = False
         self.max_frames = int(max_utterance_s * 1000 / frame_ms)
         self.min_rms, self.ratio = min_rms, ratio
         self.floor = min_rms / ratio
@@ -112,6 +116,7 @@ class EnergyVAD:
                 self._recent = []
                 self._speech_frames = self._loud_run
                 self._quiet_run = 0
+                self._barged = False
                 return ("start", None)
             return None
         self._utt.append(frame)
@@ -125,6 +130,9 @@ class EnergyVAD:
             enough = self._speech_frames >= self.min_speech_frames
             self.speaking, self._utt, self._loud_run, self._speech_frames = False, [], 0, 0
             return ("end", pcm) if enough else ("discard", None)
+        if not self._barged and self._speech_frames >= self.barge_frames:
+            self._barged = True
+            return ("barge", None)
         return None
 
 
@@ -184,6 +192,7 @@ class OpenRouterVoice:
         self._pending_tools: dict[str, ToolCall] = {}  # asked for, results not back yet
         self._tasks: set[asyncio.Task[Any]] = set()
         self._closed = False
+        self._cut = False  # a reply was cancelled by speech that hasn't been transcribed yet
 
     # ------------------------------------------------------------ RealtimeBackend
 
@@ -196,7 +205,7 @@ class OpenRouterVoice:
 
     async def send_audio(self, pcm: bytes) -> None:
         for kind, utterance in self.vad.feed(pcm):
-            if kind == "start":
+            if kind == "barge":  # someone is really talking: stop the agent
                 self._interrupt()
             elif kind == "end" and utterance:
                 self._spawn(self._on_utterance(utterance))
@@ -246,6 +255,7 @@ class OpenRouterVoice:
         self._events.put_nowait(Interrupted())
         if self._reply and not self._reply.done():
             self._reply.cancel()
+            self._cut = True  # if it turns out nobody said anything, the answer is given again
 
     def _add_user(self, text: str) -> None:
         if self._pending_tools:
@@ -269,8 +279,11 @@ class OpenRouterVoice:
             text = (await self.transcribe(pcm)).strip()
         except Exception as e:
             log.warning("transcription failed: %s", str(e)[:300])
-            return
+            text = ""
+        cut, self._cut = self._cut, False
         if not text:
+            if cut:  # background noise cut the answer short: give it again
+                self._start_reply()
             return
         self._events.put_nowait(Transcript("user", text))
         self._add_user(text)
