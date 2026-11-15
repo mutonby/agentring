@@ -84,6 +84,13 @@ function trustedProxies(value: string): number {
   return Number(value);
 }
 
+function ringTimeoutS(value: string): number {
+  if (!/^\d+$/.test(value) || Number(value) === 0) {
+    throw new Error(`AGENTRING_RING_TIMEOUT_S must be a whole number of seconds above 0 (got ${value})`);
+  }
+  return Number(value);
+}
+
 export function loadConfig(): Config {
   const dataDir = env("AGENTRING_DATA_DIR", "./data")!;
   const port = Number(env("PORT", "8080"));
@@ -136,7 +143,7 @@ export function loadConfig(): Config {
     dataDir,
     agentName: env("AGENTRING_AGENT_NAME", "Agent")!,
     apiKey: env("AGENTRING_API_KEY"),
-    ringTimeoutS: Number(env("AGENTRING_RING_TIMEOUT_S", "30")),
+    ringTimeoutS: ringTimeoutS(env("AGENTRING_RING_TIMEOUT_S", "30")!),
     trustedProxies: trustedProxies(env("AGENTRING_TRUSTED_PROXIES", "1")!),
     insecureDev,
     fcm,
