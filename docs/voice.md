@@ -112,9 +112,11 @@ The CLI (`call --ai`, `serve --ai`) and the MCP `call` tool resolve the provider
 same way: `--provider`/`--model`/`--voice` if given, else `AGENTRING_VOICE_PROVIDER`,
 `AGENTRING_VOICE_MODEL`, `AGENTRING_VOICE_NAME` (environment or `~/.agentring/.env`),
 else the defaults above. In code: `resolve_voice("grok").factory()` is what `VoiceAgent`
-takes. `AGENTRING_VOICE_LANGUAGE` (e.g. `es`) is the language Phonic speaks before it has
-heard anyone (otherwise English) and a hint for OpenAI's and Grok's transcription of the
-user; Gemini follows the instructions.
+takes. `AGENTRING_VOICE_LANGUAGE` (e.g. `es`) is added to the instructions of every provider
+("Speak es from your first word, unless the user speaks another language."), so Gemini and
+`local` greet in it too. It is also the language Phonic speaks before it has heard anyone
+(otherwise English) and a hint for OpenAI's and Grok's transcription of the user. Use a
+language name (`Spanish`) if the model needs more than the code.
 
 How they compare, measured on 2026-10-30 with the same four Spanish prompts streamed in
 real time, 3 sessions each (chat, a quick tool, two chained tools, a 3 s tool). Time is

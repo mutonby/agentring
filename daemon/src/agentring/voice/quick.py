@@ -96,5 +96,5 @@ async def build_agent(
         built.consultations = Consultations(agents.agents)
         tools.append(built.consultations.tool())
     text = read_instructions(instructions)
-    built.agent = VoiceAgent(voice_ai.factory(), text, tools, before_tool=before_tool)
+    built.agent = VoiceAgent(voice_ai.factory(), voice_ai.with_language(text), tools, before_tool=before_tool)
     return built

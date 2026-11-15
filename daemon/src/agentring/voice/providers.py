@@ -6,8 +6,9 @@
 Defaults come from the environment or ~/.agentring/.env, so the CLI and the MCP server
 agree: AGENTRING_VOICE_PROVIDER, AGENTRING_VOICE_MODEL, AGENTRING_VOICE_NAME, the
 provider's own key (GEMINI_API_KEY, OPENAI_API_KEY, XAI_API_KEY, PHONIC_API_KEY) and
-AGENTRING_VOICE_LANGUAGE (e.g. "es": Phonic speaks it before it hears anyone; OpenAI
-and Grok use it to transcribe the user; Gemini follows the instructions).
+AGENTRING_VOICE_LANGUAGE (e.g. "es"). Every provider gets it as a line in the instructions
+(`VoiceChoice.with_language`, applied by `build_agent`); Phonic also speaks it before it hears
+anyone, and OpenAI and Grok use it to transcribe the user.
 
 `local` is any OpenAI-Realtime-compatible server you run yourself (e.g. Hugging Face
 speech-to-speech in front of a small model on llama.cpp): AGENTRING_VOICE_URL says where
@@ -24,6 +25,7 @@ from typing import Any
 from ..config import secret
 
 DEFAULT_PROVIDER = "gemini"
+LANGUAGE_LINE = "Speak {language} from your first word, unless the user speaks another language."
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,14 @@ class VoiceChoice:
     voice: str | None
     language: str | None = None
     url: str | None = None  # `local` only
+
+    def with_language(self, instructions: str) -> str:
+        """The instructions plus, when a language is set, a line asking for it from the first word.
+        Every provider gets it: Gemini and `local` have no language setting, and the others
+        greet before the user has said anything that shows the language."""
+        if not self.language:
+            return instructions
+        return f"{instructions}\n\n{LANGUAGE_LINE.format(language=self.language)}"
 
     def factory(self) -> Callable[[], Any]:
         """A new backend per call (what VoiceAgent takes)."""
