@@ -28,7 +28,7 @@
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.7",
+    "vitest": "^4.1.12",
     "ws": "^8.22.0"
   }
 }
