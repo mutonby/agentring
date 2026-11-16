@@ -19,3 +19,6 @@
 -keep class org.webrtc.** { *; }
 -keep class livekit.** { *; }
 -keep class io.livekit.android.** { *; }
+# libwebrtc 150 (livekit-android 2.29.2+) ships JniZero without its generated JniZeroJni.
+# Only JniZero.setJniClassLoader references it, and WebRTC doesn't call that on Android.
+-dontwarn livekit.org.jni_zero.JniZeroJni
