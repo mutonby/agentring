@@ -43,6 +43,9 @@ cd deploy
 cp ~/Downloads/google-services.json        secrets/google-services.json
 cp ~/Downloads/agentring-*-firebase-adminsdk-*.json secrets/firebase-service-account.json
 chmod 600 secrets/*.json
+# The relay runs as uid 1000 inside its container. If your user on the server isn't
+# uid 1000 (check with `id -u`), hand the files to that uid so the relay can read them:
+sudo chown 1000:1000 secrets/*.json
 ```
 
 In `deploy/.env` uncomment:
@@ -69,6 +72,7 @@ then `agentring pair` on your computer. The app's Home screen should show
 
 | Symptom | Fix |
 |---|---|
+| Relay keeps restarting with `EACCES: permission denied` on `/secrets/…json` | The files are `chmod 600` and owned by a user other than uid 1000, the relay's user in the container: `sudo chown 1000:1000 deploy/secrets/*.json`. |
 | Relay fails to start: `google-services.json has no Android app with package name "dev.agentring.app"` | You registered a different package name. Add another Android app with `dev.agentring.app` and download the new file. |
 | Home shows *Push: Unavailable: Google Play services* | The phone has no Google Play services (e.g. some Huawei / de-Googled ROMs). UnifiedPush support is planned. |
 | Home shows *Push: Error …* | Check the phone has internet, then reopen the app. Make sure the relay was restarted after adding the files and that you re-paired. |
