@@ -145,7 +145,7 @@ the conversation and hands real work to your agents. Pick the one you like:
 | [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) | `openai` | `OPENAI_API_KEY` |
 | [Grok Voice](https://docs.x.ai/docs/guides/voice/agent) (xAI) | `grok` | `XAI_API_KEY` |
 | [Phonic](https://docs.phonic.ai) | `phonic` | `PHONIC_API_KEY` |
-| [OpenRouter](https://openrouter.ai): speech-to-text, any chat model, text-to-speech ([details](docs/voice.md#openrouter-speech-to-text--any-model--text-to-speech)) | `openrouter` | `OPENROUTER_API_KEY` |
+| [OpenRouter](https://openrouter.ai): speech-to-text, any chat model, text-to-speech, experimental ([details](docs/voice.md#openrouter-speech-to-text--any-model--text-to-speech)) | `openrouter` | `OPENROUTER_API_KEY` |
 | Your own server, e.g. [HF speech-to-speech](https://github.com/huggingface/speech-to-speech) + a small model on llama.cpp (experimental) | `local` | none |
 
 Set `AGENTRING_VOICE_PROVIDER` in `~/.agentring/.env` to use one for every call, from the

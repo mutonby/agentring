@@ -121,6 +121,8 @@ language name (`Spanish`) if the model needs more than the code.
 
 ### OpenRouter (speech-to-text → any model → text-to-speech)
 
+Status: **experimental** (contributed in #28; not yet run on real calls by the maintainers).
+
 OpenRouter has no realtime speech-to-speech API, but it serves the three pieces over HTTP
 with one key, so `openrouter` chains them: the caller's audio is cut into utterances by a
 small voice activity detector, transcribed (`/audio/transcriptions`), answered by any chat
