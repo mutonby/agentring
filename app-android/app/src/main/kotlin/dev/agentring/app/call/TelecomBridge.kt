@@ -36,7 +36,7 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
         data object Answer : Command
         data object Activate : Command
         data class Disconnect(val cause: Int) : Command
-        data class Route(val endpoint: CallEndpointCompat) : Command
+        data class Route(val endpoint: CallEndpointCompat, val done: CompletableDeferred<Boolean>) : Command
     }
 
     private val manager by lazy { CallsManager(context) }
@@ -114,6 +114,7 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
                                 }
                             }
                             if (r.getOrNull() !is CallControlResult.Success) Log.w(TAG, "$c failed: ${r.exceptionOrNull() ?: r.getOrNull()}")
+                            if (c is Command.Route) c.done.complete(r.getOrNull() is CallControlResult.Success)
                             if (c is Command.Disconnect) break
                         }
                     }
@@ -154,12 +155,16 @@ class TelecomBridge(private val context: Context, private val scope: CoroutineSc
         commands.trySend(Command.Disconnect(cause))
     }
 
-    fun route(endpoint: CallEndpointCompat) {
-        commands.trySend(Command.Route(endpoint))
+    /** Asks Telecom to move the call's audio to [endpoint]. True once Telecom says it did. */
+    suspend fun route(endpoint: CallEndpointCompat): Boolean {
+        val done = CompletableDeferred<Boolean>()
+        if (commands.trySend(Command.Route(endpoint, done)).isFailure) return false
+        return withTimeoutOrNull(ROUTE_TIMEOUT_MS) { done.await() } ?: false
     }
 
     private companion object {
         const val TAG = "TelecomBridge"
+        const val ROUTE_TIMEOUT_MS = 2_000L
 
         /** CallControl.disconnect only accepts LOCAL, REMOTE, MISSED and REJECTED. */
         fun platformCause(cause: Int): Int = when (cause) {

@@ -2,6 +2,9 @@ package dev.agentring.app.call
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import android.os.SystemClock
 import android.telecom.DisconnectCause
 import android.util.Log
@@ -101,6 +104,9 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
     private val callJobs = mutableListOf<Job>()
     /** Outgoing call: this phone is in the LiveKit room. */
     private var inRoom = false
+    private var speakerJob: Job? = null
+    /** The speaker was turned on through AudioManager because Telecom couldn't (issue #39). */
+    private var directSpeaker = false
 
     private val _joinable = MutableStateFlow<JoinOffer?>(null)
 
@@ -444,20 +450,62 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
     fun toggleSpeaker() {
         val cur = _state.value as? CallUi.Active ?: return
         val on = !cur.speaker
-        if (telecomActive) {
-            val eps = telecom.endpoints.value
-            val target = if (on) {
-                eps.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
-            } else {
-                eps.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
-                    ?: eps.firstOrNull { it.type == CallEndpointCompat.TYPE_WIRED_HEADSET }
-                    ?: eps.firstOrNull { it.type == CallEndpointCompat.TYPE_EARPIECE }
-            }
-            target?.let { telecom.route(it) }
-        } else {
+        if (!telecomActive) {
             session?.setSpeaker(on)
+            _state.value = cur.copy(speaker = on)
+            return
         }
-        _state.value = cur.copy(speaker = on)
+        if (speakerJob?.isActive == true) return
+        speakerJob = scope.launch {
+            val speaker = if (!on && directSpeaker) {
+                setSpeakerDirect(false) // we turned it on ourselves: turn it off the same way
+            } else {
+                val eps = telecom.endpoints.value
+                val target = if (on) {
+                    eps.firstOrNull { it.type == CallEndpointCompat.TYPE_SPEAKER }
+                } else {
+                    eps.firstOrNull { it.type == CallEndpointCompat.TYPE_BLUETOOTH }
+                        ?: eps.firstOrNull { it.type == CallEndpointCompat.TYPE_WIRED_HEADSET }
+                        ?: eps.firstOrNull { it.type == CallEndpointCompat.TYPE_EARPIECE }
+                }
+                val routed = target != null && telecom.route(target)
+                Log.i(TAG, "speaker $on: endpoints ${eps.map { it.type }}, target ${target?.type}, routed $routed")
+                when {
+                    routed -> on // Telecom confirmed it; the endpoint collector follows any later change
+                    // Some phones offer no speaker endpoint, or Telecom doesn't apply the change
+                    // (an Infinix on Android 13, issue #39): ask the audio system directly.
+                    on -> setSpeakerDirect(true)
+                    else -> false
+                }
+            }
+            val now = _state.value as? CallUi.Active ?: return@launch
+            if (now.info.callId == cur.info.callId) _state.value = now.copy(speaker = speaker)
+        }
+    }
+
+    /**
+     * Routes call audio to the built-in speaker (or back) through AudioManager, for when
+     * Telecom can't. Returns whether the speaker is now on.
+     */
+    private fun setSpeakerDirect(on: Boolean): Boolean {
+        val am = context.getSystemService(AudioManager::class.java) ?: return false
+        val speaker = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (on) {
+                am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    ?.let { am.setCommunicationDevice(it) } ?: false
+            } else {
+                am.clearCommunicationDevice()
+                false
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = on
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn
+        }
+        directSpeaker = speaker
+        Log.i(TAG, "speaker $on through AudioManager: ${if (speaker) "on" else "off"}")
+        return speaker
     }
 
     private fun speakerOn(): Boolean =
@@ -549,7 +597,8 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
         callJobs += scope.launch {
             telecom.endpoint.collect { ep ->
                 val cur = _state.value as? CallUi.Active ?: return@collect
-                if (ep != null) _state.value = cur.copy(speaker = ep.type == CallEndpointCompat.TYPE_SPEAKER)
+                // While AudioManager holds the speaker, Telecom's endpoint (still the earpiece) isn't the truth.
+                if (ep != null && !directSpeaker) _state.value = cur.copy(speaker = ep.type == CallEndpointCompat.TYPE_SPEAKER)
             }
         }
     }
@@ -616,6 +665,8 @@ class CallManager(private val context: Context) : TelecomBridge.Listener {
         timeoutJob?.cancel()
         callJobs.forEach { it.cancel() }
         callJobs.clear()
+        speakerJob?.cancel()
+        if (directSpeaker) setSpeakerDirect(false) // don't leave the next call (or the phone) on the speaker
         session?.close()
         session = null
         inRoom = false
