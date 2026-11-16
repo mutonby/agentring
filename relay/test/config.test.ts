@@ -41,3 +41,17 @@ describe("LiveKit config", () => {
     expect(() => loadConfig()).toThrow(/at least 32/);
   });
 });
+
+describe("ring timeout", () => {
+  it("defaults to 30 s and rejects values that would break or instantly expire calls", () => {
+    baseEnv();
+    delete process.env.AGENTRING_RING_TIMEOUT_S;
+    expect(loadConfig().ringTimeoutS).toBe(30);
+    process.env.AGENTRING_RING_TIMEOUT_S = "45";
+    expect(loadConfig().ringTimeoutS).toBe(45);
+    for (const bad of ["30s", "0", "-5", "1.5", "abc"]) {
+      process.env.AGENTRING_RING_TIMEOUT_S = bad;
+      expect(() => loadConfig(), bad).toThrow(/AGENTRING_RING_TIMEOUT_S/);
+    }
+  });
+});
