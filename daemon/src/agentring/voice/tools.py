@@ -131,6 +131,8 @@ class McpClient:
 
 def _last_sse_response(body: str, rid: Any) -> dict[str, Any] | None:
     found = None
+    # SSE lines may end in \r\n or \r as well as \n (sse-starlette, used by the Python MCP SDK, sends \r\n).
+    body = body.replace("\r\n", "\n").replace("\r", "\n")
     for block in body.split("\n\n"):
         data = "\n".join(line[5:].lstrip() for line in block.splitlines() if line.startswith("data:"))
         if data:
