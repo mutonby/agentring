@@ -34,6 +34,35 @@ log = logging.getLogger("agentring.voice")
 
 TERMINAL_STATES = {"missed", "declined", "ended", "canceled"}
 END_CALL = "end_call"
+# The call publishes at 48 kHz whatever the model speaks: some phones (an Infinix on Android 13)
+# play a 24 kHz track as silence, while the 48 kHz echo path plays everywhere (issue #38).
+PLAY_RATE = 48_000
+
+
+class Resampler:
+    """Streaming linear resampler for PCM16 mono: chunk boundaries join without a click."""
+
+    def __init__(self, src: int, dst: int):
+        self.step = src / dst  # input samples per output sample
+        self.reset()
+
+    def reset(self) -> None:
+        self.last: np.ndarray | None = None  # the previous chunk's last sample
+        self.pos = 0.0  # next output position, in input samples from that sample
+
+    def __call__(self, pcm: bytes) -> bytes:
+        if self.step == 1:
+            return pcm
+        x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+        buf = x if self.last is None else np.concatenate((self.last, x))
+        if len(buf) < 2:
+            self.last = buf[-1:] if len(buf) else self.last
+            return b""
+        at = np.arange(self.pos, len(buf) - 1, self.step)
+        out = np.interp(at, np.arange(len(buf)), buf)
+        self.pos = (at[-1] + self.step if len(at) else self.pos) - (len(buf) - 1)
+        self.last = buf[-1:]
+        return np.round(out).astype(np.int16).tobytes()
 
 
 @dataclass
@@ -158,7 +187,8 @@ class CallSession:
         self.backend: RealtimeBackend = agent.backend()
         self.tools = {t.name: t for t in agent.tools}
         self.room = rtc.Room()
-        self.source = rtc.AudioSource(self.backend.output_rate, 1, queue_size_ms=200)
+        self.source = rtc.AudioSource(PLAY_RATE, 1, queue_size_ms=200)
+        self._upsample = Resampler(self.backend.output_rate, PLAY_RATE)
         self.inputs: dict[str, bytearray] = {}  # each participant's audio, waiting to be sent
         self.output = bytearray()  # model speech waiting to play
         self.answered = asyncio.Event()
@@ -178,7 +208,7 @@ class CallSession:
         self._notes: asyncio.Queue[tuple[str, bool, bool]] = asyncio.Queue()
         self._tasks: list[asyncio.Task] = []
         self._streams: list[rtc.AudioStream] = []
-        self._frame = self.backend.output_rate // 100 * 2  # 10 ms of PCM16
+        self._frame = PLAY_RATE // 100 * 2  # 10 ms of PCM16
         self._chunk = self.backend.input_rate // 25 * 2  # 40 ms per send
 
         self.room.on("participant_connected", self._on_join)
@@ -296,7 +326,7 @@ class CallSession:
                     said_goodbye = now - self._hangup_at > 2 and now - self.last_agent_audio_at > 1.5
                     if said_goodbye or now - self._hangup_at > 20:
                         self.finish(END_CALL)
-            await self.source.capture_frame(rtc.AudioFrame(frame, self.backend.output_rate, 1, self._frame // 2))
+            await self.source.capture_frame(rtc.AudioFrame(frame, PLAY_RATE, 1, self._frame // 2))
 
     async def _notes_loop(self) -> None:
         # `trusted` is optional in a backend: one written before it existed keeps working.
@@ -319,10 +349,11 @@ class CallSession:
             # In its own task: the call keeps listening and talking while a tool works.
             self._tasks.append(asyncio.create_task(self._answer_tools(ev.calls)))
         elif isinstance(ev, AudioOut):
-            self.output += ev.pcm
+            self.output += self._upsample(ev.pcm)
             self.last_agent_audio_at = time.time()
         elif isinstance(ev, Interrupted):
             self.output.clear()
+            self._upsample.reset()
             self.source.clear_queue()
         elif isinstance(ev, Transcript):
             self.partial[ev.role] += ev.text

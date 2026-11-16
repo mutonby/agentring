@@ -332,7 +332,25 @@ def test_mixing_and_model_events():
     assert rest == (0, 20)  # the longer one keeps its leftover
     assert s.transcript == [("user", "hola, ¿qué tal?"), ("agent", "Bien.")]
     assert s.last_user_speech_at > 0
-    assert queued == 200 and len(s.output) == 0  # interrupted: queued speech dropped
+    assert queued == 396 and len(s.output) == 0  # 100 samples at 24 kHz → 198 at 48 kHz; interrupted: dropped
+
+
+def test_model_speech_is_published_at_48_khz():
+    """Some phones play a 24 kHz track as silence (issue #38): model speech is upsampled to 48 kHz,
+    and chunk boundaries don't change the result."""
+    import numpy as np
+
+    from agentring.voice.session import PLAY_RATE, Resampler
+
+    t = np.arange(2400) / 24_000
+    pcm = (np.sin(2 * np.pi * 440 * t) * 10_000).astype(np.int16).tobytes()
+    whole = Resampler(24_000, PLAY_RATE)(pcm)
+    r = Resampler(24_000, PLAY_RATE)
+    chunked = b"".join(r(pcm[i : i + 482]) for i in range(0, len(pcm), 482))  # odd-sized chunks
+    assert chunked == whole and len(whole) // 2 == 2 * 2400 - 2
+    out = np.frombuffer(whole, dtype=np.int16)
+    assert np.allclose(out[::2], np.frombuffer(pcm, dtype=np.int16)[:-1], atol=1)  # original samples kept
+    assert Resampler(PLAY_RATE, PLAY_RATE)(pcm) == pcm  # already 48 kHz: untouched
 
 
 def test_is_incoming_call():
