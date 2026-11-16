@@ -286,7 +286,7 @@ def test_other_backends_take_the_provenance_argument_and_ignore_it():
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTRING_HOME", str(tmp_path))
     for name in ("AGENTRING_VOICE_PROVIDER", "AGENTRING_VOICE_MODEL", "AGENTRING_VOICE_NAME",
-                 "AGENTRING_VOICE_URL", "AGENTRING_VOICE_KEY",
+                 "AGENTRING_VOICE_URL", "AGENTRING_VOICE_KEY", "AGENTRING_VOICE_LANGUAGE",
                  "GEMINI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "PHONIC_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     return tmp_path
@@ -309,6 +309,21 @@ def test_resolve_voice_defaults_and_settings(home, monkeypatch):
     # Arguments win; the configured voice belongs to grok, so gemini starts from its own default.
     c = resolve_voice("Gemini", model="gemini-x")
     assert (c.provider.name, c.model, c.voice) == ("gemini", "gemini-x", "Charon")
+
+
+def test_language_line_reaches_every_provider(home, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("XAI_API_KEY", "x")
+    assert resolve_voice().with_language("Be brief.") == "Be brief."  # unset: no line
+
+    monkeypatch.setenv("AGENTRING_VOICE_LANGUAGE", "es")
+    line = "Speak es from your first word, unless the user speaks another language."
+    gemini = resolve_voice()  # takes_language=False: the instructions are the only way in
+    assert gemini.with_language("Be brief.") == f"Be brief.\n\n{line}"
+    assert not hasattr(gemini.factory()(), "language")
+    grok = resolve_voice("grok")  # takes_language=True: keeps its kwarg and gets the line too
+    assert grok.factory()().language == "es" and line in grok.with_language("Be brief.")
+    assert line in resolve_voice("local").with_language("Be brief.")
 
 
 def test_resolve_voice_errors(home, monkeypatch):

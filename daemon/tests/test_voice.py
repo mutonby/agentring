@@ -494,7 +494,7 @@ def test_build_agent_passes_before_tool(monkeypatch):
     def gate(session, call):
         return None
 
-    choice = type("Choice", (), {"factory": lambda self: _NullBackend})()
+    choice = type("Choice", (), {"factory": lambda self: _NullBackend, "with_language": lambda self, text: text})()
     built = asyncio.run(quick.build_agent(choice, before_tool=gate))
     assert built.agent.before_tool is gate
     assert asyncio.run(quick.build_agent(choice)).agent.before_tool is None  # `call --ai`, `serve --ai`: unchanged
