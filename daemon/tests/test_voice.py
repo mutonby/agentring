@@ -506,10 +506,22 @@ def test_instructions_ask_to_talk_before_tools():
     async def run():
         text = await _session()._instructions()
         assert text.startswith("x\n\n") and "let me check" in text and "Never answer from memory" in text
-        agent = VoiceAgent(lambda: _NullBackend(), "x", [])  # no tools: nothing to add
+        agent = VoiceAgent(lambda: _NullBackend(), "x", [], prompts=Prompts(now=""))  # no tools: nothing to add
         assert await CallSession(agent, CallInfo("c", "t"))._instructions() == "x"
         agent = VoiceAgent(lambda: _NullBackend(), "x", [Tool("add", "Add.", lambda a, b: a + b)],
-                           prompts=Prompts(before_tools=""))
+                           prompts=Prompts(before_tools="", now=""))
         assert await CallSession(agent, CallInfo("c", "t"))._instructions() == "x"
 
     asyncio.run(run())
+
+
+def test_instructions_carry_the_date_and_time():
+    """Voice models don't know today's date: every call gets it, unless Prompts.now is ""."""
+    from datetime import datetime
+
+    async def run():
+        agent = VoiceAgent(lambda: _NullBackend(), "x", [])
+        return await CallSession(agent, CallInfo("c", "t"))._instructions()
+
+    text = asyncio.run(run())
+    assert text.startswith("x\n\nIt is now ") and datetime.now().strftime("%Y-%m-%d") in text
