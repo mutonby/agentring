@@ -21,9 +21,10 @@ import sys
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import __version__
 from .config import Settings, home_dir
@@ -129,6 +130,14 @@ def quota_note(upgrade_url: str | None) -> str:
     if upgrade_url:
         note += f" They can upgrade to Pro at {upgrade_url} ; tell them, with this link."
     return note
+
+
+def with_upgrade_hint(minutes_low: str, upgrade_url: str | None) -> str:
+    """The voice AI's "minutes running out" note, plus where to get more (the site, said aloud)."""
+    host = urlsplit(upgrade_url).hostname if upgrade_url else None
+    if not minutes_low or not host:
+        return minutes_low
+    return f"{minutes_low} Also say they can get more call minutes with Pro on {host.removeprefix('www.')}."
 
 
 class AgentringTools:
@@ -263,6 +272,8 @@ class AgentringTools:
             async with self._call_lock:
                 built = await build_agent(choice, instructions=instructions, agents=agents,
                                           before_tool=self.before_tool or after_user_speech)
+                p = built.agent.prompts
+                built.agent.prompts = replace(p, minutes_low=with_upgrade_hint(p.minutes_low, self.upgrade_url))
                 try:
                     created = await asyncio.to_thread(self.client.create_call, reason,
                                                       priority="urgent" if urgent else "normal",

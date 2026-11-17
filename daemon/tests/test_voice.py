@@ -409,6 +409,32 @@ def test_notes_loop_passes_provenance_only_to_backends_that_take_it():
     assert asyncio.run(run(New())) == [("mine", False, True), ("theirs", True, False)]
 
 
+def test_warns_once_before_the_plan_minutes_cut_the_call():
+    from agentring.mcp_server import with_upgrade_hint
+    from agentring.voice.session import MINUTES_LOW_MS, Prompts
+
+    async def run(prompts=None):
+        s = CallSession(VoiceAgent(lambda: _NullBackend(), "x", prompts=prompts), CallInfo("call_1", "test"))
+        notes = []
+        for left in (None, 600_000, MINUTES_LOW_MS + 1, 38_000, 20_000, 0):  # what each relay poll says
+            s.check_time_left(left)
+            while not s._notes.empty():
+                notes.append(s._notes.get_nowait())
+        return notes
+
+    notes = asyncio.run(run())
+    assert len(notes) == 1  # once, at the first poll under the threshold
+    text, respond, trusted = notes[0]
+    assert "about 40 seconds" in text and respond and trusted
+    assert asyncio.run(run(Prompts(minutes_low=""))) == []  # "" turns it off
+
+    # The hosted MCP server adds where to get more minutes, as a site name the voice can say.
+    hint = with_upgrade_hint(Prompts().minutes_low, "https://www.agentring.io/app?lang=en#usage")
+    assert hint.endswith("get more call minutes with Pro on agentring.io.")
+    assert with_upgrade_hint(Prompts().minutes_low, None) == Prompts().minutes_low
+    assert with_upgrade_hint("", "https://agentring.io/app") == ""
+
+
 def test_after_user_speech_gate_holds_tools_until_the_user_speaks():
     from agentring.voice.quick import NO_USER_YET, after_user_speech
 
@@ -437,13 +463,17 @@ class _FakeBuilt:
     consultations = None
 
     def __init__(self, seen: dict):
+        from agentring.voice.session import Prompts
+
         self.seen = seen
         self.agent = self
+        self.prompts = Prompts()
 
     async def run(self, info, join, *, relay=None):
         from agentring.voice.session import CallResult
 
         self.seen["info"] = info
+        self.seen["minutes_low"] = self.prompts.minutes_low
         return CallResult(info.call_id, False, 0, "no_answer")
 
     async def aclose(self):
@@ -491,6 +521,14 @@ def test_missed_targeted_call_sends_no_message(monkeypatch, tmp_path):
     out, client, seen = _mcp_call(monkeypatch, tmp_path, device_ids=["dev_A"])
     assert client.create_args["device_ids"] == ["dev_A"] and seen["info"].device_ids == ["dev_A"]
     assert client.messages == [] and out["fallback_msg_id"] is None
+
+
+def test_hosted_calls_say_where_to_get_more_minutes(monkeypatch, tmp_path):
+    from agentring.voice.session import Prompts
+
+    seen = _mcp_call(monkeypatch, tmp_path, upgrade_url="https://agentring.io/app#usage")[2]
+    assert seen["minutes_low"].endswith("with Pro on agentring.io.")
+    assert _mcp_call(monkeypatch, tmp_path / "self")[2]["minutes_low"] == Prompts().minutes_low
 
 
 def test_missed_group_call_still_leaves_a_message(monkeypatch, tmp_path):

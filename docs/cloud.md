@@ -56,7 +56,9 @@ Per tenant, set by the admin API; `null` = unlimited (the default).
 | `messages_per_day` | `POST /v1/messages` (agent and user messages, UTC day) | `402 quota_exceeded` |
 
 Call seconds = answered time (`answered_at` → `ended_at`) of the tenant's calls in the
-current UTC calendar month.
+current UTC calendar month. While a call is active, `GET /v1/calls/{call_id}` also gives
+`time_left_ms`, how long it can still last; the voice AI tells the user about 40 s before
+the cut (`Prompts.minutes_low`).
 
 ### Admin API
 
@@ -114,7 +116,9 @@ deleting the tenant or restarting the relay revokes them.
   relay's own one-call-per-tenant rule still applies. `agents.yaml` is never used.
 - **Plan limits:** a `quota_exceeded` tool error ends with "The user's agentring plan
   limit is reached" and, with `AGENTRING_UPGRADE_URL` set, the link to upgrade; a call
-  the relay ended for minutes (`end_reason: quota`) returns a `note` saying so.
+  the relay ended for minutes (`end_reason: quota`) returns a `note` saying so. Shortly
+  before that cut, the voice AI says the minutes are running out and, with
+  `AGENTRING_UPGRADE_URL` set, names the site to get more.
 - **Long requests:** `call` and a waiting `get_replies` answer as `text/event-stream`
   with an SSE keep-alive comment every 15 s.
 - **State:** per tenant, the daemon's usual SQLite mirror (`Store`, synced with the

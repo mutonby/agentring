@@ -101,6 +101,10 @@ describe("calls", () => {
     expect((await post(d.headers, "decline")).json().state).toBe("ringing");
     // A answers, B joins later while it still rings
     expect((await post(a.headers, "accept")).json().call.state).toBe("active");
+    // A self-hosted relay has no call-time limit, so nothing to count down.
+    const got = await b.app.inject({ method: "GET", url: `/v1/calls/${call.call_id}`, headers: a.headers });
+    expect(got.json().state).toBe("active");
+    expect(got.json().time_left_ms).toBeUndefined();
     vi.advanceTimersByTime(10_000);
     const joinB = await post(c.headers, "accept");
     expect(joinB.statusCode).toBe(200);

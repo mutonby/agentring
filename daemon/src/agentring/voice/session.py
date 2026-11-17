@@ -34,6 +34,9 @@ log = logging.getLogger("agentring.voice")
 
 TERMINAL_STATES = {"missed", "declined", "ended", "canceled"}
 END_CALL = "end_call"
+# Warn the user this long before a hosted relay cuts the call for the plan's minutes: enough
+# for one sentence and a goodbye, with the relay polled every few seconds.
+MINUTES_LOW_MS = 40_000
 # The call publishes at 48 kHz whatever the model speaks: some phones (an Infinix on Android 13)
 # play a 24 kHz track as silence, while the 48 kHz echo path plays everywhere (issue #38).
 PLAY_RATE = 48_000
@@ -92,6 +95,10 @@ class Prompts:
     left: str = "({name} hung up; still on the call: {others}.)"
     end_call: str = "End the call once the user says goodbye or asks you to hang up (say goodbye first)."
     tool_timeout: str = "Still running after {seconds} s; it carries on in the background. Tell the user."
+    # When a hosted relay is about to end the call because the plan's call minutes run out
+    # (`time_left_ms` on the call). "" says nothing.
+    minutes_low: str = ("(The user's plan has about {seconds} seconds of call time left this month; then the call "
+                        "ends by itself.) Tell them in one short sentence, then wrap up and say goodbye.")
     # Added to the instructions when the call has tools: some models go quiet until a tool answers,
     # which on a phone sounds like the line dropped. "" leaves the instructions as they are.
     before_tools: str = ("Before you call a tool, say a few words first so the line is never silent (for example "
@@ -204,6 +211,7 @@ class CallSession:
         self.last_agent_audio_at = 0.0
         self.answered_at: float | None = None
         self._hangup_at = 0.0
+        self._minutes_warned = False
         self._empty: asyncio.TimerHandle | None = None
         self._notes: asyncio.Queue[tuple[str, bool, bool]] = asyncio.Queue()
         self._tasks: list[asyncio.Task] = []
@@ -420,11 +428,20 @@ class CallSession:
         while not self.done.is_set():
             await asyncio.sleep(3)
             try:
-                state = (await asyncio.to_thread(self.relay.get_call, self.info.call_id)).get("state")
+                call = await asyncio.to_thread(self.relay.get_call, self.info.call_id)
             except Exception:
                 continue
-            if state in TERMINAL_STATES:
-                self.finish(f"relay:{state}")
+            if call.get("state") in TERMINAL_STATES:
+                self.finish(f"relay:{call['state']}")
+            self.check_time_left(call.get("time_left_ms"))
+
+    def check_time_left(self, left_ms: int | None) -> None:
+        """A hosted relay ends the call when the plan's minutes run out: tell the model once,
+        shortly before, so the user hears why instead of the line just dropping."""
+        if left_ms is None or left_ms > MINUTES_LOW_MS or self._minutes_warned or not self.prompts.minutes_low:
+            return
+        self._minutes_warned = True
+        self.notify(self.prompts.minutes_low.format(seconds=max(5, round(left_ms / 5000) * 5)), respond=True)
 
     async def _instructions(self) -> str:
         ins = self.agent.instructions

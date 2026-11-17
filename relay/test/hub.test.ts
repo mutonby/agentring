@@ -160,10 +160,15 @@ describe("hub mode", () => {
     expect(call.json.join.room).toBe(`${a.tid}.${id}`);
 
     expect((await http("POST", `/t/${a.tid}/v1/calls/${id}/accept`, dev.headers)).status).toBe(200);
+    // The voice agent can see how long the call has left, to warn the user before the cut.
+    const active = await http("GET", `/t/${a.tid}/v1/calls/${id}`, a.auth);
+    expect(active.json.time_left_ms).toBeGreaterThan(1000);
+    expect(active.json.time_left_ms).toBeLessThanOrEqual(2000);
     await new Promise((r) => setTimeout(r, 2300));
     const ended = await http("GET", `/t/${a.tid}/v1/calls/${id}`, a.auth);
     expect(ended.json.state).toBe("ended");
     expect(ended.json.end_reason).toBe("quota");
+    expect(ended.json.time_left_ms).toBeUndefined();
     const t = await app.inject({ method: "GET", url: `/admin/v1/tenants/${a.tid}`, headers: ADMIN });
     expect(t.json().usage.call_seconds).toBeGreaterThanOrEqual(2);
     expect(t.json().usage.calls).toBe(1);

@@ -596,6 +596,8 @@ export interface components {
             ended_by?: components["schemas"]["Actor"];
             end_reason?: components["schemas"]["EndReason"];
             duration_ms?: number;
+            /** @description Only in `GET /v1/calls/{call_id}` for an active call on a relay that limits call time (a hosted plan): how much longer it can last before the relay ends it with `end_reason: quota`. A voice agent can warn the user before the cut. */
+            time_left_ms?: number;
             /** @description Device that placed or answered the call. */
             device_id?: components["schemas"]["DeviceId"];
             /** @description Targeted call only; the phones it rings. Absent = every paired phone. */

@@ -319,7 +319,8 @@ A hosted relay (docs/cloud.md) serves each tenant under a base URL with a path,
 `https://host/t/{tenant_id}`; clients append `/v1/...` to it as usual. It may refuse
 `POST /v1/pair`, `/v1/calls` and `/v1/messages` with `402 quota_exceeded` when the
 plan's limit is reached, end an active call with `end_reason: "quota"` when the call
-minutes run out, and answer `403 tenant_disabled` for a disabled account. A
+minutes run out (until then `GET /v1/calls/{call_id}` shows `time_left_ms`, so a voice
+agent can warn the user), and answer `403 tenant_disabled` for a disabled account. A
 self-hosted relay never does any of this.
 
 ## Daemon local HTTP API (M5, sketch)

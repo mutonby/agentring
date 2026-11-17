@@ -636,7 +636,8 @@ export function callRoutes(app: FastifyInstance, ctx: Ctx, calls: Calls): void {
   app.get<{ Params: { call_id: string } }>("/v1/calls/:call_id", { preHandler: auth, schema: { params: CALL_ID } }, async (req) => {
     const c = calls.get(req.params.call_id);
     if (!c || !canSee(c, principal(req))) throw notFound("Call");
-    return callFromRow(c);
+    const left = c.state === "active" ? callMsLeft(ctx.db, ctx.limits()) : undefined;
+    return { ...callFromRow(c), ...(left !== undefined ? { time_left_ms: left } : {}) };
   });
 
   app.post<{ Params: { call_id: string } }>(
