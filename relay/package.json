@@ -17,7 +17,7 @@
     "gen:types": "openapi-typescript ../protocol/relay.openapi.yaml -o src/generated/api.ts"
   },
   "dependencies": {
-    "@fastify/websocket": "^11.3.6",
+    "@fastify/websocket": "^11.3.7",
     "fastify": "^5.12.8",
     "jose": "^6.2.15",
     "livekit-server-sdk": "2.19.2"
