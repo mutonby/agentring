@@ -11,7 +11,7 @@ coreKtx = "1.16.0"
 concurrentFutures = "1.2.0"
 firebaseBom = "34.0.0"
 codeScanner = "16.1.0"
-livekit = "2.29.2"
+livekit = "2.30.0"
 coreTelecom = "1.0.1"
 # Android Auto (Car App Library); 1.8 is still a release candidate.
 carApp = "1.7.0"
