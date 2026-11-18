@@ -112,7 +112,7 @@ enum AudioGate {
     static func prepareSession() {
         let s = AVAudioSession.sharedInstance()
         do {
-            try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP])
+            try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .allowBluetoothA2DP])
         } catch {
             log.error("audio session category: \(error.localizedDescription, privacy: .public)")
         }

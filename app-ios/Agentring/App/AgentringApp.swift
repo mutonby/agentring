@@ -45,17 +45,25 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     /// Silent pushes (`call.end`): catch up so a stale "join" offer disappears.
-    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
-        guard let event = PushContent.verifiedEvent(userInfo, pairing: AppModel.shared.pairing) else { return .noData }
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        // Verify here, before anything crosses into a Task: only the Sendable event goes on.
+        guard let event = PushContent.verifiedEvent(userInfo, pairing: AppModel.shared.pairing) else {
+            completionHandler(.noData)
+            return
+        }
         AppModel.shared.onEvent(event)
-        if event.callId != nil {
-            let center = UNUserNotificationCenter.current()
-            let delivered = await center.deliveredNotifications()
-            let ids = delivered.filter { $0.request.content.userInfo["call_id"] as? String == event.callId
+        guard let callId = event.callId else {
+            completionHandler(.newData)
+            return
+        }
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered.filter { $0.request.content.userInfo["call_id"] as? String == callId
                 && $0.request.content.categoryIdentifier == "CALL_JOINABLE" }.map(\.request.identifier)
             center.removeDeliveredNotifications(withIdentifiers: ids)
+            completionHandler(.newData)
         }
-        return .newData
     }
 }
 

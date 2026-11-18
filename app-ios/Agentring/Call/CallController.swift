@@ -1,6 +1,6 @@
 import AgentringCore
 import AVFoundation
-import CallKit
+@preconcurrency import CallKit
 import CryptoKit
 import Foundation
 import Observation
