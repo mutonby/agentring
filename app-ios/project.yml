@@ -96,3 +96,21 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.agentring.app.NotificationService
         TARGETED_DEVICE_FAMILY: "1"
+  AgentringUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [AgentringUITests]
+    dependencies:
+      - target: Agentring
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentring.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  Agentring:
+    build:
+      targets:
+        Agentring: all
+    test:
+      targets: [AgentringUITests]

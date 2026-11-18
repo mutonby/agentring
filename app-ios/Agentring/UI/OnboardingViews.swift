@@ -51,7 +51,8 @@ struct WelcomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Image("Logo").resizable().scaledToFit().frame(width: 72, height: 72).accessibilityHidden(true)
+                Image("Logo").resizable().scaledToFit().frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)).accessibilityHidden(true)
                 Text(L("welcome_title")).font(.largeTitle.bold())
                 Text(L("welcome_body")).foregroundStyle(Brand.secondaryText)
                 VStack(spacing: 12) {

@@ -47,37 +47,50 @@ public enum PairingKeychain {
     private static let service = "dev.agentring.pairing"
     private static let account = "current"
 
-    private static func query() -> [String: Any] {
+    private static func query(shared: Bool = true) -> [String: Any] {
         var q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        if let group = SharedConfig.keychainGroup { q[kSecAttrAccessGroup as String] = group }
+        if shared, let group = SharedConfig.keychainGroup { q[kSecAttrAccessGroup as String] = group }
         return q
     }
 
     public static func load() -> Pairing? {
-        var q = query()
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-        return try? JSONDecoder().decode(Pairing.self, from: data)
+        for shared in [true, false] {
+            var q = query(shared: shared)
+            q[kSecReturnData as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitOne
+            var out: CFTypeRef?
+            if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data {
+                return try? JSONDecoder().decode(Pairing.self, from: data)
+            }
+        }
+        return nil
     }
 
+    /// Saves in the group shared with the notification extension. Without the
+    /// keychain-sharing entitlement (an unsigned build) it falls back to the app's own
+    /// keychain: the app works, only the extension can't fill in push texts.
     @discardableResult
     public static func save(_ p: Pairing) -> Bool {
         guard let data = try? JSONEncoder().encode(p) else { return false }
-        SecItemDelete(query() as CFDictionary)
-        var q = query()
-        q[kSecValueData as String] = data
-        // The notification extension runs while the phone is locked: readable after first unlock.
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        return SecItemAdd(q as CFDictionary, nil) == errSecSuccess
+        clear()
+        for shared in [true, false] {
+            var q = query(shared: shared)
+            q[kSecValueData as String] = data
+            // The notification extension runs while the phone is locked: readable after first unlock.
+            q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let status = SecItemAdd(q as CFDictionary, nil)
+            if status == errSecSuccess { return true }
+            if status != errSecMissingEntitlement { return false }
+        }
+        return false
     }
 
     public static func clear() {
-        SecItemDelete(query() as CFDictionary)
+        SecItemDelete(query(shared: true) as CFDictionary)
+        SecItemDelete(query(shared: false) as CFDictionary)
     }
 }

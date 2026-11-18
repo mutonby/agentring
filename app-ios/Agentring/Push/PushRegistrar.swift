@@ -54,7 +54,8 @@ final class PushRegistrar: NSObject {
             do {
                 try await RelayAPI(baseURL: pairing.relayUrl, deviceJwt: pairing.deviceJwt).updateApnsTokens(tokens)
                 SharedConfig.defaults.set(fingerprint, forKey: sentKey)
-                AppModel.shared.pushState = .registered
+                // The relay stores the tokens either way; it can only use them with APNs set up.
+                AppModel.shared.pushState = pairing.canPush ? .registered : .notConfigured
             } catch let e as RelayError where e.isUnauthorized {
                 AppModel.shared.onUnauthorized()
             } catch {

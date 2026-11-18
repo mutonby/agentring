@@ -90,6 +90,17 @@ cd relay && npm test               # includes test/apns.test.ts
 
 Both scripts run with only the Command Line Tools (no Xcode). The app itself needs Xcode.
 
+```bash
+app-ios/scripts/test-ui.sh         # XCUITest of the real app in the simulator against a local relay:
+                                   # onboarding, pair by pasted code, socket, message in and reply out,
+                                   # "agent offline", incoming call reported to CallKit
+app-ios/scripts/dev-relay.sh       # a local relay (+ LiveKit) and a pairing code, to try the app by hand
+```
+
+The simulator has no CallKit incoming-call screen: it reports the call fine and then ends
+it at once (a `CXEndCallAction` from the system ~0.1 s later). Ringing, answering and audio
+need a real iPhone, as do VoIP pushes.
+
 ## App Store notes
 
 - Background modes: `voip`, `audio`, `remote-notification`. Review asks for a demo: reviewer

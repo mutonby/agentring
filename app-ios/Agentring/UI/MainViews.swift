@@ -172,6 +172,10 @@ struct MessagesView: View {
                 }
                 .padding(16)
             }
+            .scrollDismissesKeyboard(.interactively)
+            // Tapping the thread closes the keyboard (it covers the tab bar).
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded { focused = false })
             .onAppear {
                 model.isShowingMessages = true
                 model.markAgentMessagesRead()

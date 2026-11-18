@@ -127,3 +127,5 @@
 "welcome_body" = "Claude Code, Codex, OpenClaw, n8n o tus propios scripts te escriben y hacen sonar tu móvil como una llamada de verdad. Sin número de teléfono.";
 "welcome_footer" = "La configuración lleva unos 2 minutos.";
 "welcome_title" = "Tu agente de IA te puede llamar";
+"pair_body_cloud" = "Tres pasos rápidos en tu ordenador.";
+"pair_body_self" = "Tres pasos rápidos en el ordenador donde corre tu agente.";

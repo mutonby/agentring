@@ -127,3 +127,5 @@
 "welcome_body" = "Claude Code, Codex, OpenClaw, n8n or your own scripts can message you and ring your phone like a real call. No phone number needed.";
 "welcome_footer" = "Setup takes about 2 minutes.";
 "welcome_title" = "Your AI agent can call you";
+"pair_body_cloud" = "Three quick steps on your computer.";
+"pair_body_self" = "Three quick steps on the computer that runs your agent.";
