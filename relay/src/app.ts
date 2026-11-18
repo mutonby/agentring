@@ -14,6 +14,7 @@ import { LiveKitServer, type LiveKitService } from "./livekit.js";
 import type { PushConfig } from "./protocol.js";
 import { type Limits, UNLIMITED } from "./quota.js";
 import { PushDispatcher } from "./push/dispatcher.js";
+import { ApnsProvider, type ApnsSender } from "./push/apns.js";
 import { FcmProvider } from "./push/fcm.js";
 import type { PushProvider } from "./push/push-provider.js";
 import { Calls, callRoutes, targetsOf } from "./routes/calls.js";
@@ -26,6 +27,8 @@ export interface BuildOptions {
   logger?: FastifyServerOptions["logger"];
   /** Inject a push provider (tests). Defaults to FCM when configured. */
   pushProvider?: PushProvider;
+  /** APNs for iPhones; the hub shares one across tenants. */
+  apnsSender?: ApnsSender;
   /** Inject LiveKit (tests). Defaults to the configured server, if any. */
   livekit?: LiveKitService;
   /** A pino-compatible logger to use instead of creating one (hub mode: a child per tenant). */
@@ -104,6 +107,8 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   const provider: PushProvider | undefined =
     opts.pushProvider ?? (cfg.fcm ? new FcmProvider(cfg.fcm.serviceAccountFile, cfg.fcm.apiBase) : undefined);
   const pushConfig: PushConfig = cfg.fcm ? { provider: "fcm", fcm: cfg.fcm.client } : null;
+  const apns: ApnsSender | undefined = opts.apnsSender ?? (cfg.apns ? new ApnsProvider(cfg.apns) : undefined);
+  const apnsPushConfig: PushConfig = apns ? { provider: "apns", apns: { topic: apns.topic } } : null;
   if (!provider && !opts.tenant) app.log.warn("Push is not configured: the phone will only get events while the app is open");
 
   const events = new EventLog(db);
@@ -115,6 +120,7 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
     events,
     relayId,
     pushConfig,
+    apnsPushConfig,
     pushProviderName: provider?.name ?? "none",
     hub: new WsHub(events),
     livekit: opts.livekit ?? (cfg.livekit ? new LiveKitServer(cfg.livekit) : undefined),
@@ -126,10 +132,18 @@ export async function buildApp(cfg: Config, opts: BuildOptions = {}): Promise<Bu
   ctx.calls = calls;
   events.setVisibility((e, p) => calls.eventVisibleTo(e, p));
 
-  const dispatcher = new PushDispatcher(db, provider, relayId, app.log, (id) => {
-    const c = calls.get(id);
-    return c && { direction: c.direction, device_ids: targetsOf(c) };
-  });
+  const dispatcher = new PushDispatcher(
+    db,
+    provider,
+    relayId,
+    app.log,
+    (id) => {
+      const c = calls.get(id);
+      return c && { direction: c.direction, device_ids: targetsOf(c) };
+    },
+    apns,
+    cfg.agentName,
+  );
   events.onEvent((e) => dispatcher.handle(e));
 
   app.setErrorHandler((err, req, reply) => {

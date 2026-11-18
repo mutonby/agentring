@@ -99,6 +99,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/device/apns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update the calling iPhone's APNs tokens.
+         * @description iOS only. `voip_token` is the PushKit token: it receives `call.invite` only,
+         *     because iOS requires every VoIP push to report a call to CallKit.
+         *     `apns_token` is the regular remote-notification token: messages, "join the
+         *     call", missed calls and call ends. Send whichever changed; at least one.
+         */
+        post: operations["updateApnsTokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/devices": {
         parameters: {
             query?: never;
@@ -524,9 +547,13 @@ export interface components {
             pairing_token: string;
             /** @description May be omitted if not yet available; send later via /v1/device/fcm. */
             fcm_token?: string;
+            /** @description iOS only. May be omitted and sent later via /v1/device/apns. */
+            apns_token?: string;
+            /** @description iOS only (PushKit). May be omitted and sent later via /v1/device/apns. */
+            voip_token?: string;
+            apns_env?: components["schemas"]["ApnsEnv"];
             device_name: string;
-            /** @enum {string} */
-            platform: "android";
+            platform: components["schemas"]["Platform"];
             app_version?: string;
         };
         PairResponse: {
@@ -555,12 +582,32 @@ export interface components {
                 /** @description project_number */
                 sender_id: string;
             };
+        } | {
+            /** @constant */
+            provider: "apns";
+            apns: {
+                /** @description The app's bundle id, e.g. dev.agentring.app */
+                topic: string;
+            };
+        };
+        /** @enum {string} */
+        Platform: "android" | "ios";
+        /**
+         * @description Which APNs gateway the app's tokens belong to: `sandbox` for Xcode
+         *     development builds, `production` for TestFlight and the App Store.
+         * @default production
+         * @enum {string}
+         */
+        ApnsEnv: "sandbox" | "production";
+        ApnsTokens: {
+            apns_token?: string;
+            voip_token?: string;
+            apns_env?: components["schemas"]["ApnsEnv"];
         };
         Device: {
             device_id: components["schemas"]["DeviceId"];
             name: string;
-            /** @enum {string} */
-            platform: "android";
+            platform: components["schemas"]["Platform"];
             app_version?: string;
             created_at: components["schemas"]["Timestamp"];
             last_seen_at?: components["schemas"]["Timestamp"];
@@ -823,6 +870,8 @@ export interface components {
         /**
          * @description The FCM `data` map (all values are strings). `event` is the compact JSON
          *     of an `Event`; `sig` = base64url(HMAC-SHA256(push_secret, event)).
+         *     On iOS the same four keys sit at the top level of the APNs payload, next
+         *     to `aps` (see `ApnsPayload`).
          */
         PushData: {
             /** @constant */
@@ -830,6 +879,17 @@ export interface components {
             relay_id: components["schemas"]["RelayId"];
             event: string;
             sig: string;
+        };
+        /**
+         * @description What an iPhone receives. `call.invite` comes as a VoIP push (PushKit,
+         *     `aps` empty) and must be reported to CallKit at once. Everything else is
+         *     a regular push: `msg.new` and `call.missed` show an alert (`mutable-content`
+         *     lets the app's notification extension verify `sig` and swap the text for
+         *     a generic one if it fails); `call.accept` and `call.end` are silent
+         *     (`content-available`). Alert texts use `loc-key`s so the app translates them.
+         */
+        ApnsPayload: components["schemas"]["PushData"] & {
+            aps: Record<string, never>;
         };
     };
     responses: {
@@ -1022,6 +1082,30 @@ export interface operations {
                 "application/json": {
                     fcm_token: string;
                 };
+            };
+        };
+        responses: {
+            /** @description Updated. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateApnsTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApnsTokens"];
             };
         };
         responses: {

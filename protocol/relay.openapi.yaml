@@ -133,6 +133,27 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /v1/device/apns:
+    post:
+      tags: [devices]
+      operationId: updateApnsTokens
+      summary: Update the calling iPhone's APNs tokens.
+      description: |
+        iOS only. `voip_token` is the PushKit token: it receives `call.invite` only,
+        because iOS requires every VoIP push to report a call to CallKit.
+        `apns_token` is the regular remote-notification token: messages, "join the
+        call", missed calls and call ends. Send whichever changed; at least one.
+      security: [{ deviceJwt: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApnsTokens" }
+      responses:
+        "204": { description: Updated. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
   /v1/devices:
     get:
       tags: [devices]
@@ -742,8 +763,17 @@ components:
           description: May be omitted if not yet available; send later via /v1/device/fcm.
           type: string
           maxLength: 4096
+        apns_token:
+          description: iOS only. May be omitted and sent later via /v1/device/apns.
+          type: string
+          pattern: "^[0-9a-f]{16,200}$"
+        voip_token:
+          description: iOS only (PushKit). May be omitted and sent later via /v1/device/apns.
+          type: string
+          pattern: "^[0-9a-f]{16,200}$"
+        apns_env: { $ref: "#/components/schemas/ApnsEnv" }
         device_name: { type: string, minLength: 1, maxLength: 64 }
-        platform: { type: string, enum: [android] }
+        platform: { $ref: "#/components/schemas/Platform" }
         app_version: { type: string, maxLength: 32 }
     PairResponse:
       type: object
@@ -777,13 +807,41 @@ components:
                 application_id: { type: string, description: "mobilesdk_app_id, e.g. 1:1234:android:abcd" }
                 api_key: { type: string }
                 sender_id: { type: string, description: "project_number" }
+        - type: object
+          description: |
+            Returned to iPhones when the relay sends through APNs. Nothing to set up
+            on the phone: the relay holds the publisher's APNs key.
+          required: [provider, apns]
+          properties:
+            provider: { const: apns }
+            apns:
+              type: object
+              required: [topic]
+              properties:
+                topic: { type: string, description: "The app's bundle id, e.g. dev.agentring.app" }
+    Platform: { type: string, enum: [android, ios] }
+    ApnsEnv:
+      description: |
+        Which APNs gateway the app's tokens belong to: `sandbox` for Xcode
+        development builds, `production` for TestFlight and the App Store.
+      type: string
+      enum: [sandbox, production]
+      default: production
+    ApnsTokens:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        apns_token: { type: string, pattern: "^[0-9a-f]{16,200}$" }
+        voip_token: { type: string, pattern: "^[0-9a-f]{16,200}$" }
+        apns_env: { $ref: "#/components/schemas/ApnsEnv" }
     Device:
       type: object
       required: [device_id, name, platform, created_at, has_push_token]
       properties:
         device_id: { $ref: "#/components/schemas/DeviceId" }
         name: { type: string }
-        platform: { type: string, enum: [android] }
+        platform: { $ref: "#/components/schemas/Platform" }
         app_version: { type: string }
         created_at: { $ref: "#/components/schemas/Timestamp" }
         last_seen_at: { $ref: "#/components/schemas/Timestamp" }
@@ -1083,6 +1141,8 @@ components:
       description: |
         The FCM `data` map (all values are strings). `event` is the compact JSON
         of an `Event`; `sig` = base64url(HMAC-SHA256(push_secret, event)).
+        On iOS the same four keys sit at the top level of the APNs payload, next
+        to `aps` (see `ApnsPayload`).
       type: object
       required: [v, relay_id, event, sig]
       properties:
@@ -1090,3 +1150,17 @@ components:
         relay_id: { $ref: "#/components/schemas/RelayId" }
         event: { type: string }
         sig: { type: string }
+    ApnsPayload:
+      description: |
+        What an iPhone receives. `call.invite` comes as a VoIP push (PushKit,
+        `aps` empty) and must be reported to CallKit at once. Everything else is
+        a regular push: `msg.new` and `call.missed` show an alert (`mutable-content`
+        lets the app's notification extension verify `sig` and swap the text for
+        a generic one if it fails); `call.accept` and `call.end` are silent
+        (`content-available`). Alert texts use `loc-key`s so the app translates them.
+      allOf:
+        - $ref: "#/components/schemas/PushData"
+        - type: object
+          required: [aps]
+          properties:
+            aps: { type: object }

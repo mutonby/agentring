@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { APNS_HOSTS, type ApnsConfig } from "./push/apns.js";
 
 export interface FcmClientConfig {
   project_id: string;
@@ -27,6 +28,8 @@ export interface Config {
     /** Overridable for tests. */
     apiBase: string;
   };
+  /** APNs for iPhones; only the app publisher's key can push to the App Store app (docs/ios.md). */
+  apns?: ApnsConfig;
 }
 
 export interface LiveKitConfig {
@@ -39,6 +42,7 @@ export interface LiveKitConfig {
 }
 
 export const ANDROID_PACKAGE = "dev.agentring.app";
+export const IOS_BUNDLE_ID = "dev.agentring.app";
 
 function env(name: string, fallback?: string): string | undefined {
   const v = process.env[name];
@@ -116,6 +120,26 @@ export function loadConfig(): Config {
     };
   }
 
+  let apns: ApnsConfig | undefined;
+  const apnsKeyFile = env("APNS_KEY_FILE");
+  const apnsKeyId = env("APNS_KEY_ID");
+  const apnsTeamId = env("APNS_TEAM_ID");
+  if (apnsKeyFile || apnsKeyId || apnsTeamId) {
+    if (!apnsKeyFile || !apnsKeyId || !apnsTeamId) {
+      throw new Error("Set APNS_KEY_FILE, APNS_KEY_ID and APNS_TEAM_ID to enable iPhone push");
+    }
+    apns = {
+      keyFile: apnsKeyFile,
+      keyId: apnsKeyId,
+      teamId: apnsTeamId,
+      topic: env("APNS_TOPIC", IOS_BUNDLE_ID)!,
+      hosts: {
+        production: env("APNS_HOST", APNS_HOSTS.production)!.replace(/\/+$/, ""),
+        sandbox: env("APNS_SANDBOX_HOST", APNS_HOSTS.sandbox)!.replace(/\/+$/, ""),
+      },
+    };
+  }
+
   let livekit: LiveKitConfig | undefined;
   const lkKey = env("LIVEKIT_API_KEY");
   // Prefer a file (mounted read-only) so the secret never sits in the environment,
@@ -147,6 +171,7 @@ export function loadConfig(): Config {
     trustedProxies: trustedProxies(env("AGENTRING_TRUSTED_PROXIES", "1")!),
     insecureDev,
     fcm,
+    apns,
     livekit,
   };
 }

@@ -27,3 +27,9 @@ uv.lock.bak
 !.env.local.example
 service-account*.json
 *-firebase-adminsdk-*.json
+
+# iOS
+app-ios/**/.build/
+app-ios/**/*.xcodeproj/xcuserdata/
+app-ios/**/*.xcworkspace/xcuserdata/
+app-ios/build/
