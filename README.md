@@ -171,7 +171,7 @@ agents you'd trust someone holding your phone with. Details and the threat model
 
 ## Limitations
 
-- Android only (no iOS yet). Android Auto is in beta and only in the APK from Releases:
+- Android today; the iPhone app is in progress (docs/ios.md). Android Auto is in beta and only in the APK from Releases:
   Google Play doesn't allow calling apps for cars in production yet
   ([docs/android-auto.md](docs/android-auto.md)).
 - It's a young project. The app is on Google Play, and we test it most on a Pixel 6

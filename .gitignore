@@ -33,3 +33,5 @@ app-ios/**/.build/
 app-ios/**/*.xcodeproj/xcuserdata/
 app-ios/**/*.xcworkspace/xcuserdata/
 app-ios/build/
+app-ios/Agentring.xcodeproj/
+app-ios/Config/Local.xcconfig
