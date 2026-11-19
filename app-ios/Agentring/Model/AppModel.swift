@@ -37,6 +37,14 @@ final class AppModel {
     }
 
     init() {
+        // The keychain outlives the app: after a reinstall, forget the old pairing (the
+        // relay may have revoked it, and the user expects a fresh start). Standard
+        // UserDefaults, unlike the keychain, are deleted with the app.
+        if !UserDefaults.standard.bool(forKey: "installed") {
+            PairingKeychain.clear()
+            SharedConfig.defaults.removeObject(forKey: "onboarded")
+            UserDefaults.standard.set(true, forKey: "installed")
+        }
         pairing = PairingKeychain.load()
         onboarded = SharedConfig.defaults.bool(forKey: "onboarded") && PairingKeychain.load() != nil
     }

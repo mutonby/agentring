@@ -95,11 +95,20 @@ app-ios/scripts/test-ui.sh         # XCUITest of the real app in the simulator a
                                    # onboarding, pair by pasted code, socket, message in and reply out,
                                    # "agent offline", incoming call reported to CallKit
 app-ios/scripts/dev-relay.sh       # a local relay (+ LiveKit) and a pairing code, to try the app by hand
+app-ios/scripts/test-nse.sh        # the notification extension's real code on macOS: signed, tampered and foreign pushes
 ```
 
+`test-ui.sh` also calls the agent: with an xAI key (`XAI_API_KEY` or the agentring secrets file) it runs
+`agentring serve --ai --provider grok` against the local relay, otherwise `scripts/fake-agent.py`, an echo
+agent that reports how many audio frames it got from the phone (the test checks it's more than zero).
+Then a second "phone" answers an agent call (the app must offer Join) and the agent revokes the iPhone
+(the app must say it was unpaired). `simctl push` skips notification service extensions, hence `test-nse.sh`.
+
 The simulator has no CallKit incoming-call screen: it reports the call fine and then ends
-it at once (a `CXEndCallAction` from the system ~0.1 s later). Ringing, answering and audio
-need a real iPhone, as do VoIP pushes.
+it at once (a `CXEndCallAction` from the system ~0.1 s later). Outgoing calls work, but its
+CallKit sometimes ends one it just started, more often after many calls (`xcrun simctl erase`
+helps); the UI test retries the call up to 3 times. Incoming ringing, answering and VoIP
+pushes need a real iPhone.
 
 ## App Store notes
 
