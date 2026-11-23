@@ -119,3 +119,6 @@ pushes need a real iPhone.
   doesn't apply. The app shows `agentring.io` as plain text and never links to plans or
   payments (guideline 3.1.1).
 - `ITSAppUsesNonExemptEncryption = false`: only standard HTTPS/TLS and WebRTC.
+- Privacy manifests (`PrivacyInfo.xcprivacy` in the app and the extension): no tracking; UserDefaults
+  reasons CA92.1 and 1C8F.1 (App Group); collected data types match the App Store privacy label
+  (messages, call audio, push tokens/device id, call and read events: app functionality, linked).

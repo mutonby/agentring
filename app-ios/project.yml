@@ -13,7 +13,7 @@ configFiles:
 settings:
   base:
     MARKETING_VERSION: "0.3.3"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
     CODE_SIGN_STYLE: Automatic
