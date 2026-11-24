@@ -16,6 +16,7 @@ or run everything on your own server.
 [![CI](https://github.com/mutonby/agentring/actions/workflows/ci.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/ci.yml)
 [![Android](https://github.com/mutonby/agentring/actions/workflows/android.yml/badge.svg)](https://github.com/mutonby/agentring/actions/workflows/android.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![mutonby/agentring MCP server](https://glama.ai/mcp/servers/mutonby/agentring/badges/score.svg)](https://glama.ai/mcp/servers/mutonby/agentring)
 
 https://github.com/user-attachments/assets/4d925f22-727f-4d66-8665-c392cc3d1eb3
 
