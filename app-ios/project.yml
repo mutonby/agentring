@@ -1,0 +1,116 @@
+# Generate the Xcode project with XcodeGen (brew install xcodegen): `xcodegen` in app-ios/.
+# The .xcodeproj is generated, not committed; this file is the source of truth.
+name: Agentring
+options:
+  bundleIdPrefix: dev.agentring
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Signing.xcconfig
+  Release: Config/Signing.xcconfig
+settings:
+  base:
+    MARKETING_VERSION: "0.3.3"
+    CURRENT_PROJECT_VERSION: "2"
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: NO
+packages:
+  AgentringCore:
+    path: AgentringCore
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift
+    exactVersion: 2.19.0
+targets:
+  Agentring:
+    type: application
+    platform: iOS
+    sources:
+      - path: Agentring
+      - path: Shared
+    dependencies:
+      - package: AgentringCore
+      - package: LiveKit
+      - target: NotificationService
+        embed: true
+    entitlements:
+      path: Agentring/Agentring.entitlements
+      properties:
+        aps-environment: development
+        com.apple.security.application-groups: [group.dev.agentring.app]
+        keychain-access-groups: ["$(AppIdentifierPrefix)dev.agentring.shared"]
+    info:
+      path: Agentring/Info.plist
+      properties:
+        CFBundleDisplayName: agentring
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+        ITSAppUsesNonExemptEncryption: false
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: AccentColor
+        UIBackgroundModes: [voip, audio, remote-notification]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
+        NSMicrophoneUsageDescription: Your agent's calls need the microphone so you can talk to it.
+        NSCameraUsageDescription: The camera scans the pairing QR code.
+        NSLocalNetworkUsageDescription: To reach an agentring relay you run on your own network.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentring.app
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        INFOPLIST_KEY_CFBundleDisplayName: agentring
+  NotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: NotificationService
+      - path: Shared
+    dependencies:
+      - package: AgentringCore
+    entitlements:
+      path: NotificationService/NotificationService.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.agentring.app]
+        keychain-access-groups: ["$(AppIdentifierPrefix)dev.agentring.shared"]
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: agentring notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        AppIdentifierPrefix: $(AppIdentifierPrefix)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentring.app.NotificationService
+        TARGETED_DEVICE_FAMILY: "1"
+  AgentringUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [AgentringUITests]
+    dependencies:
+      - target: Agentring
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentring.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  Agentring:
+    build:
+      targets:
+        Agentring: all
+    test:
+      targets: [AgentringUITests]

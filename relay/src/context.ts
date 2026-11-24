@@ -18,6 +18,8 @@ export interface Ctx {
   events: EventLog;
   relayId: string;
   pushConfig: PushConfig;
+  /** `push_config` handed to iPhones at pairing: APNs, or null when the relay can't reach them. */
+  apnsPushConfig: PushConfig;
   pushProviderName: string;
   hub: WsHub;
   /** Undefined when LiveKit isn't configured: calls are then unavailable. */

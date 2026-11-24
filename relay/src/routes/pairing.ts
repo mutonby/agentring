@@ -8,6 +8,8 @@ import type { Device, Schemas } from "../protocol.js";
 import { checkPair } from "../quota.js";
 
 const PAIR_WINDOW_MS = 60_000;
+/** APNs device and PushKit tokens: hex, 32 bytes today; Apple says not to rely on the length. */
+const APNS_TOKEN_PATTERN = "^[0-9a-f]{16,200}$";
 const PAIR_MAX_ATTEMPTS = 10;
 /** Addresses the limiter remembers at most; the oldest go first. */
 const PAIR_MAX_KEYS = 10_000;
@@ -18,6 +20,8 @@ interface DeviceRow {
   platform: string;
   app_version: string | null;
   fcm_token: string | null;
+  apns_token?: string | null;
+  voip_token?: string | null;
   created_at: number;
   last_seen_at: number | null;
   revoked_at: number | null;
@@ -27,12 +31,13 @@ export function deviceFromRow(r: DeviceRow): Device {
   return {
     device_id: r.device_id,
     name: r.name,
-    platform: "android",
+    platform: r.platform === "ios" ? "ios" : "android",
     ...(r.app_version ? { app_version: r.app_version } : {}),
     created_at: r.created_at,
     ...(r.last_seen_at ? { last_seen_at: r.last_seen_at } : {}),
     ...(r.revoked_at ? { revoked_at: r.revoked_at } : {}),
-    has_push_token: r.fcm_token !== null,
+    // An iPhone can only ring with its PushKit token.
+    has_push_token: r.platform === "ios" ? (r.voip_token ?? null) !== null : r.fcm_token !== null,
   };
 }
 
@@ -64,7 +69,7 @@ export function revokeDevice(ctx: Ctx, deviceId: string): void {
   const row = ctx.db.prepare("SELECT revoked_at FROM devices WHERE device_id = ?").get(deviceId);
   if (!row) throw notFound("Device");
   ctx.db
-    .prepare("UPDATE devices SET revoked_at = COALESCE(revoked_at, ?), fcm_token = NULL WHERE device_id = ?")
+    .prepare("UPDATE devices SET revoked_at = COALESCE(revoked_at, ?), fcm_token = NULL, apns_token = NULL, voip_token = NULL WHERE device_id = ?")
     .run(Date.now(), deviceId);
   ctx.hub.disconnectDevice(deviceId);
   ctx.calls?.deviceRevoked(deviceId);
@@ -100,8 +105,11 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
           properties: {
             pairing_token: { type: "string", maxLength: 128 },
             fcm_token: { type: "string", maxLength: 4096 },
+            apns_token: { type: "string", pattern: APNS_TOKEN_PATTERN },
+            voip_token: { type: "string", pattern: APNS_TOKEN_PATTERN },
+            apns_env: { type: "string", enum: ["sandbox", "production"] },
             device_name: { type: "string", minLength: 1, maxLength: 64 },
-            platform: { type: "string", enum: ["android"] },
+            platform: { type: "string", enum: ["android", "ios"] },
             app_version: { type: "string", maxLength: 32 },
           },
         },
@@ -130,10 +138,23 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
 
       const deviceId = newId("dev");
       const pushSecret = randomBytes(32).toString("base64url");
+      const ios = b.platform === "ios";
       db.prepare(
-        `INSERT INTO devices (device_id, name, platform, app_version, push_secret, fcm_token, created_at, last_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(deviceId, b.device_name, b.platform, b.app_version ?? null, pushSecret, b.fcm_token ?? null, now, now);
+        `INSERT INTO devices (device_id, name, platform, app_version, push_secret, fcm_token, apns_token, voip_token, apns_env, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        deviceId,
+        b.device_name,
+        b.platform,
+        b.app_version ?? null,
+        pushSecret,
+        ios ? null : (b.fcm_token ?? null),
+        ios ? (b.apns_token ?? null) : null,
+        ios ? (b.voip_token ?? null) : null,
+        ios ? (b.apns_env ?? "production") : null,
+        now,
+        now,
+      );
 
       const body: Schemas["PairResponse"] = {
         device_id: deviceId,
@@ -141,7 +162,7 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
         push_secret: pushSecret,
         relay_id: ctx.relayId,
         agent_name: ctx.cfg.agentName,
-        push_config: ctx.pushConfig,
+        push_config: ios ? ctx.apnsPushConfig : ctx.pushConfig,
       };
       req.log.info({ device: deviceId, name: b.device_name }, "device paired");
       return reply.code(201).send(body);
@@ -165,6 +186,38 @@ export function pairingRoutes(app: FastifyInstance, ctx: Ctx): void {
       const p = principal(req);
       if (p.kind !== "device") throw new Error("unreachable");
       db.prepare("UPDATE devices SET fcm_token = ? WHERE device_id = ?").run(req.body.fcm_token, p.deviceId);
+      return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Body: Schemas["ApnsTokens"] }>(
+    "/v1/device/apns",
+    {
+      preHandler: requireAuth(ctx, "device"),
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            apns_token: { type: "string", pattern: APNS_TOKEN_PATTERN },
+            voip_token: { type: "string", pattern: APNS_TOKEN_PATTERN },
+            apns_env: { type: "string", enum: ["sandbox", "production"] },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const p = principal(req);
+      if (p.kind !== "device") throw new Error("unreachable");
+      const row = db.prepare("SELECT platform FROM devices WHERE device_id = ?").get(p.deviceId) as { platform: string } | undefined;
+      if (row?.platform !== "ios") throw new ApiError(400, "invalid_request", "APNs tokens are for iOS devices");
+      const b = req.body;
+      if (!b.apns_token && !b.voip_token) throw new ApiError(400, "invalid_request", "Send apns_token, voip_token or both");
+      db.prepare(
+        `UPDATE devices SET apns_token = COALESCE(?, apns_token), voip_token = COALESCE(?, voip_token),
+           apns_env = COALESCE(?, apns_env) WHERE device_id = ?`,
+      ).run(b.apns_token ?? null, b.voip_token ?? null, b.apns_env ?? null, p.deviceId);
       return reply.code(204).send();
     },
   );

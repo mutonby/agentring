@@ -23,6 +23,7 @@ import { type Config, trustedHops } from "../config.js";
 import { ApiError, notFound, unauthorized } from "../errors.js";
 import { newId, randomToken } from "../ids.js";
 import { LiveKitServer, type LiveKitService } from "../livekit.js";
+import { ApnsProvider, type ApnsSender } from "../push/apns.js";
 import { FcmProvider } from "../push/fcm.js";
 import type { PushProvider } from "../push/push-provider.js";
 import { type Limits, UNLIMITED, usage } from "../quota.js";
@@ -43,6 +44,7 @@ export interface HubOptions {
   adminToken: string;
   logger?: boolean;
   pushProvider?: PushProvider;
+  apnsSender?: ApnsSender;
   livekit?: LiveKitService;
   idleUnloadMs?: number;
 }
@@ -93,6 +95,7 @@ export class Hub {
    */
   private readonly agentTokens = new Map<string, { tenantId: string; expiresAt: number }>();
   private readonly provider?: PushProvider;
+  private readonly apns?: ApnsSender;
   private readonly livekit?: LiveKitService;
   private sweeper?: NodeJS.Timeout;
   log!: FastifyBaseLogger;
@@ -103,6 +106,7 @@ export class Hub {
   ) {
     this.registry = new Registry(cfg.dataDir === ":memory:" ? ":memory:" : join(cfg.dataDir, "hub.db"));
     this.provider = opts.pushProvider ?? (cfg.fcm ? new FcmProvider(cfg.fcm.serviceAccountFile, cfg.fcm.apiBase) : undefined);
+    this.apns = opts.apnsSender ?? (cfg.apns ? new ApnsProvider(cfg.apns) : undefined);
     this.livekit = opts.livekit ?? (cfg.livekit ? new LiveKitServer(cfg.livekit) : undefined);
   }
 
@@ -145,6 +149,7 @@ export class Hub {
     t.built = await buildApp(cfg, {
       loggerInstance: this.log.child({ tenant: tenantId }),
       pushProvider: this.provider,
+      apnsSender: this.apns,
       livekit: this.livekit,
       tenant: {
         apiKeyHash: () => t.record.api_key_hash,

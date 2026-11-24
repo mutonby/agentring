@@ -1,0 +1,3 @@
+/* Generated from app-android/app/src/main/res (same keys) plus iOS-only strings. */
+"call_in_progress_with" = "Llamada en curso con %1$@";
+"call_missed_from" = "Llamada perdida de %1$@";
