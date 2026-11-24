@@ -28,7 +28,8 @@ version: [demo.gif](docs/media/demo.gif).*
 
 With the hosted version there is no server, Firebase project or voice AI key to set up.
 
-1. **Install the app** from [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app&referrer=utm_source%3Dgithub%26utm_medium%3Dreadme) (Android 8 or newer).
+1. **Install the app** from [Google Play](https://play.google.com/store/apps/details?id=dev.agentring.app&referrer=utm_source%3Dgithub%26utm_medium%3Dreadme) (Android 8 or newer)
+   or the [App Store](https://apps.apple.com/app/id6838442765) (iPhone, iOS 17 or newer).
 2. **[Sign in at agentring.io](https://agentring.io/login)** with your email (free plan, no
    card) and scan the QR code on your dashboard with the app. The phone is paired.
 3. **Add the MCP server to your agent.** The dashboard shows the command with your key:
@@ -90,7 +91,8 @@ Everything on your own machines, free and without limits. You need:
 - a free Firebase project, which is what makes a locked phone ring ([docs/firebase.md](docs/firebase.md)),
 - a key for the voice AI: Gemini ([free tier](https://aistudio.google.com/apikey)), or OpenAI,
   xAI (Grok), Phonic or OpenRouter ([providers](docs/voice.md#providers)),
-- an Android phone.
+- an Android phone. An iPhone pairs too, but with your own relay it only gets calls and
+  messages while the app is open ([docs/ios.md](docs/ios.md#self-hosted-relays)).
 
 ```bash
 # 1. The relay, on a server with a domain (ports 80, 443, UDP 50000-50100 and TCP 7881 open)
@@ -135,6 +137,8 @@ vendor's battery saver: [docs/troubleshooting-oem.md](docs/troubleshooting-oem.m
 - **daemon** (Python): the `agentring` CLI, the MCP server and the voice AI. Runs next
   to your agents, behind NAT is fine.
 - **Android app** (Kotlin): QR pairing, the native call screen, messages.
+- **iPhone app** (Swift): the same, with CallKit and PushKit; pushes go straight to APNs
+  ([docs/ios.md](docs/ios.md)).
 
 The voice AI is the voice, your agent is the brain: a realtime speech model handles
 the conversation and hands real work to your agents. Pick the one you like:
@@ -171,10 +175,12 @@ agents you'd trust someone holding your phone with. Details and the threat model
 
 ## Limitations
 
-- Android today; the iPhone app is in progress (docs/ios.md). Android Auto is in beta and only in the APK from Releases:
+- On an iPhone, a self-hosted relay can only reach the app while it is open: Apple only
+  delivers pushes signed with the app publisher's key ([docs/ios.md](docs/ios.md#self-hosted-relays)).
+- Android Auto is in beta and only in the APK from Releases:
   Google Play doesn't allow calling apps for cars in production yet
   ([docs/android-auto.md](docs/android-auto.md)).
-- It's a young project. The app is on Google Play, and we test it most on a Pixel 6
+- It's a young project. The app is on Google Play and the App Store, and we test it most on a Pixel 6
   (Android 16); other vendors' battery savers can hold a call back
   ([docs/troubleshooting-oem.md](docs/troubleshooting-oem.md)). If it misbehaves on your
   phone, please open an issue.
@@ -189,6 +195,7 @@ agents you'd trust someone holding your phone with. Details and the threat model
 cd relay && npm ci && npm test                         # relay
 cd daemon && uv run --extra voice pytest               # daemon (+ e2e against the relay build)
 cd app-android && ./gradlew :core:test :app:assembleDebug
+cd app-ios && ./scripts/test-ui.sh                     # iPhone app (Xcode, simulator)
 ```
 
 CI builds the APK and runs an end-to-end test on an Android emulator against a real
