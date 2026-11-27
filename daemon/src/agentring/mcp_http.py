@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import resource
 import secrets
 import signal
 import time
@@ -1033,11 +1034,31 @@ def _describe(m: dict[str, Any]) -> str:
     return str(m.get("method"))
 
 
+def raise_nofile_limit(cap: int = 65536) -> int | None:
+    """Raises this process's soft open-files limit to the hard one (at most `cap`). Every
+    connection, SQLite tenant store (db + wal + shm), relay client and live call room holds
+    descriptors; a container's default soft limit (often 1024) is hit in a burst, and then
+    accept() and every new LiveKit connection fail with EMFILE. Returns the limit now in
+    force, or None when it can't be read (no `resource` on this platform)."""
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        want = cap if hard == resource.RLIM_INFINITY else min(hard, cap)
+        if soft != resource.RLIM_INFINITY and soft < want:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+            soft = want
+        return None if soft == resource.RLIM_INFINITY else soft
+    except (ValueError, OSError):
+        return None
+
+
 def run_http(cfg: HttpConfig) -> None:
     async def main() -> None:
         loop = asyncio.get_running_loop()
         # Relay requests run in threads (sync httpx); many tenants waiting at once need more than the default.
         loop.set_default_executor(ThreadPoolExecutor(max_workers=64, thread_name_prefix="agentring-mcp"))
+        limit = raise_nofile_limit()
+        if limit:
+            log.info("open-file limit: %d", limit)
         stop = asyncio.Event()
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:

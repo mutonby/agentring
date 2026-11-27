@@ -907,3 +907,17 @@ def test_hub_base_url_on_public_http_is_not_used(tmp_path: Path):
     r = KeyResolver(hub_cfg(tmp_path), transport=httpx.MockTransport(answer))
     with pytest.raises(UpstreamError):
         asyncio.run(r.resolve("ak_x"))
+
+
+def test_raise_nofile_limit_lifts_the_soft_limit_to_the_hard_one():
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (256, hard))
+        got = mcp_http.raise_nofile_limit(cap=4096)
+        want = 4096 if hard == resource.RLIM_INFINITY else min(hard, 4096)
+        assert got == want
+        assert resource.getrlimit(resource.RLIMIT_NOFILE)[0] == want
+        assert mcp_http.raise_nofile_limit(cap=100) == want  # never lowers
+    finally:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
