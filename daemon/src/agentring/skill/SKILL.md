@@ -31,6 +31,8 @@ The voice AI on the call knows only what you pass:
 - `context`: what happened, the options, your recommendation, and exactly what you
   need from the user. Write it for someone who has not seen your work; no ids,
   paths or links (they get read aloud).
+- `caller_name` and `voice` (optional): the name the phone shows and the voice AI's
+  voice (`male`, `female` or a provider voice). Use them only if the user asked for them.
 
 `call` returns when the call ends. Read the `transcript` (and `end_reason`:
 `no_answer`, `hung_up`, `end_call`, …) and act on what the user said. If nobody
