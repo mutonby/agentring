@@ -124,7 +124,11 @@ The voice model decides which tools to call based on what it hears, and anyone
 who can speak on the call (or near the phone) can influence it. Expose only
 what the caller should be able to do: `--tools` (or `tools:` per MCP server in
 `~/.agentring/agents.yaml`) restricts a server to an allowlist, and the
-library's `before_tool` hook can block or rewrite a call.
+library's `before_tool` hook can block or rewrite a call. By default the voice AI
+reads every tool request back and runs it only after the user speaks again
+(`confirm_first`), so text from another program (the calling agent's `context`, an
+agent's answer, a tool's output) can't run a tool by itself. It checks that the user
+spoke, not who: anyone on the call, or audible near the phone, can still say yes.
 
 `consult_agent` runs a command agent as an argv list, never through a shell;
 the task text from the voice model is passed as a single argument (or on

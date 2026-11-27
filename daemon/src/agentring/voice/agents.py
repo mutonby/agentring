@@ -121,6 +121,7 @@ class McpServer:
 class AgentsConfig:
     agents: list[CommandAgent] = field(default_factory=list)
     mcp: list[McpServer] = field(default_factory=list)
+    confirm: bool = True  # the voice AI reads each tool request back and waits for a spoken yes
 
 
 def _str_map(value: Any, what: str) -> dict[str, str]:
@@ -136,10 +137,14 @@ def parse_agents(data: Any) -> AgentsConfig:
         return AgentsConfig()
     if not isinstance(data, dict):
         raise AgentsConfigError("agents.yaml must be a mapping with `agents` and/or `mcp`")
-    unknown = set(data) - {"agents", "mcp"}
+    unknown = set(data) - {"agents", "mcp", "confirm"}
     if unknown:
         raise AgentsConfigError(f"unknown keys in agents.yaml: {', '.join(sorted(unknown))}")
     cfg = AgentsConfig()
+    if "confirm" in data:
+        if not isinstance(data["confirm"], bool):
+            raise AgentsConfigError("`confirm` must be true or false")
+        cfg.confirm = data["confirm"]
     agents = data.get("agents") or {}
     if not isinstance(agents, dict):
         raise AgentsConfigError("`agents` must map each agent's name to its settings")

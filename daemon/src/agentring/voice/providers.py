@@ -48,6 +48,11 @@ class Provider:
     takes_language: bool = True
     key_required: bool = True
     default_url: str | None = None  # only for `local`: where its server listens
+    # The voices the MCP `call` tool's `voice` may name (any case); () = any name (the user's own
+    # server picks). `male`/`female`: what "male" and "female" pick.
+    voices: tuple[str, ...] = ()
+    male: str | None = None
+    female: str | None = None
 
     def backend_class(self) -> Any:
         if self.name == "gemini":
@@ -70,9 +75,14 @@ class Provider:
 
 
 PROVIDERS = {p.name: p for p in (
-    Provider("gemini", "Gemini Live", "GEMINI_API_KEY", "gemini-3.8-live", "Charon", takes_language=False),
-    Provider("openai", "OpenAI Realtime", "OPENAI_API_KEY", "gpt-realtime-2.1", "marin"),
-    Provider("grok", "Grok Voice", "XAI_API_KEY", "grok-voice-latest", None),
+    Provider("gemini", "Gemini Live", "GEMINI_API_KEY", "gemini-3.8-live", "Charon", takes_language=False,
+             voices=("Puck", "Charon", "Kore", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"),
+             male="Charon", female="Kore"),
+    Provider("openai", "OpenAI Realtime", "OPENAI_API_KEY", "gpt-realtime-2.1", "marin",
+             voices=("alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"),
+             male="cedar", female="marin"),
+    Provider("grok", "Grok Voice", "XAI_API_KEY", "grok-voice-latest", None,
+             voices=("ara", "eve", "leo", "rex", "sal"), male="rex", female="ara"),
     Provider("phonic", "Phonic", "PHONIC_API_KEY", "phonic-1", None),
     Provider("local", "Local (OpenAI Realtime compatible)", "AGENTRING_VOICE_KEY", "local", None,
              takes_language=False, key_required=False, default_url="ws://127.0.0.1:8765/v1/realtime"),
@@ -140,6 +150,22 @@ class VoiceChoice:
         if self.provider.name == "openrouter":
             kw.update(openrouter_settings())
         return lambda: cls(self.api_key, **kw)
+
+
+def pick_voice(provider: Provider, wanted: str) -> str:
+    """The voice the MCP `call` tool's `voice` asks for: "male" or "female", or one of the
+    provider's voices by name (any case). Any name for a provider with no list (`local`, …)."""
+    w = wanted.strip()
+    gender = w.lower() in ("male", "female")
+    if gender and (v := provider.male if w.lower() == "male" else provider.female):
+        return v
+    if not provider.voices and w and not gender:
+        return w
+    for v in provider.voices:
+        if v.lower() == w.lower():
+            return v
+    names = f"male, female or one of {', '.join(provider.voices)}" if provider.voices else "a voice name"
+    raise VoiceConfigError(f"unknown voice {wanted!r} for {provider.label}: use {names}")
 
 
 def resolve_voice(provider: str | None = None, model: str | None = None, voice: str | None = None) -> VoiceChoice:

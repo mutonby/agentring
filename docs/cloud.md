@@ -111,7 +111,8 @@ deleting the tenant or restarting the relay revokes them.
   of the public `base_url`. Without a hub, every key is checked against the one relay
   in `AGENTRING_RELAY_URL` with `GET /v1/status` (self-hosted).
 - **Voice:** `call` runs the voice AI on the server (provider and key from the server's
-  environment, as for `agentring call --ai`), with a global cap on concurrent calls
+  environment, as for `agentring call --ai`; the call's `voice` picks `male`, `female` or one
+  of that provider's voices, and `caller_name` the name the phone shows), with a global cap on concurrent calls
   (`AGENTRING_MCP_MAX_CALLS`, default 4; over it the tool error is `busy`). The
   relay's own one-call-per-tenant rule still applies. `agents.yaml` is never used.
 - **Plan limits:** a `quota_exceeded` tool error ends with "The user's agentring plan

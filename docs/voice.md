@@ -86,17 +86,24 @@ connection), the relay says it is over, or the model's session limit is near
 **Text the voice AI should not obey.** Two things can reach the model from other programs:
 
 - The MCP `call` tool's `context` comes from the calling agent, which may be passing on
-  text it read somewhere. So on those calls `before_tool` defaults to `after_user_speech`
-  (`agentring.voice`): every tool is refused, with a note telling the model to ask,
-  until someone on the call has spoken, going by the transcript. Hanging up is never
-  held back. `AgentringTools(..., before_tool=…)` replaces it. `call --ai` and
-  `serve --ai` have no gate: their instructions are your own.
-- A late `consult_agent` answer is an agent's output, so it is a note with `trusted=False`.
-  `RealtimeBackend.send_text(text, *, respond, trusted=True)` gets that flag. Gemini,
-  OpenAI and Grok send every note with the `user` role and ignore it. Phonic only takes
-  text as a system message, so it sends such a note fenced as data, with a random tag and
-  a line telling the model not to obey it. The fence is a label, not a guarantee. A custom
-  backend without the `trusted` parameter keeps working and gets these notes as text.
+  text it read somewhere, and a `consult_agent` answer can carry text from anywhere.
+  So every voice agent built by `build_agent` (the MCP `call` tool, `call --ai`,
+  `serve --ai`) gates its tools with `confirm_first` (`agentring.voice`): nothing runs
+  until someone on the call has spoken; the first request for a tool is answered with
+  "say what you are about to do and ask"; the same request (same tool, same arguments)
+  runs only when it comes again after the user has said something since. Text from
+  another program can ask for a tool but can't speak on the call, and the user hears
+  what will run before it does. Hanging up is never held back. `confirm: false` in
+  agents.yaml relaxes it to `after_user_speech` (tools run once anyone has spoken);
+  `build_agent(..., before_tool=…)` and `AgentringTools(..., before_tool=…)` replace it.
+  It checks that the user spoke, not what they said: the model is told to go ahead only
+  on a clear yes.
+- An agent's answer is a note with `trusted=False`.
+  `RealtimeBackend.send_text(text, *, respond, trusted=True)` gets that flag, and every
+  built-in backend sends such a note fenced as data, with a random tag and a line telling
+  the model not to obey it. The fence is a label, not a guarantee; `confirm_first` is what
+  stops a tool. A custom backend without the `trusted` parameter keeps working and gets
+  these notes as text.
 
 ## Providers
 
@@ -112,7 +119,7 @@ connection), the relay says it is over, or the model's session limit is near
 The CLI (`call --ai`, `serve --ai`) and the MCP `call` tool resolve the provider the
 same way: `--provider`/`--model`/`--voice` if given, else `AGENTRING_VOICE_PROVIDER`,
 `AGENTRING_VOICE_MODEL`, `AGENTRING_VOICE_NAME` (environment or `~/.agentring/.env`),
-else the defaults above. In code: `resolve_voice("grok").factory()` is what `VoiceAgent`
+else the defaults above. The MCP `call` tool's `voice` argument wins over all of them for one call: `male` or `female` (Gemini `Charon`/`Kore`, OpenAI `cedar`/`marin`, Grok `rex`/`ara`) or one of the provider's voice names. In code: `resolve_voice("grok").factory()` is what `VoiceAgent`
 takes. `AGENTRING_VOICE_LANGUAGE` (e.g. `es`) is added to the instructions of every provider
 ("Speak es from your first word, unless the user speaks another language."), so Gemini and
 `local` greet in it too. It is also the language Phonic speaks before it has heard anyone

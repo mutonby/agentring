@@ -25,6 +25,7 @@ _WHERE = {
     "CallInfo": "session", "CallResult": "session", "CallSession": "session", "Prompts": "session",
     "VoiceAgent": "session",
     "after_user_speech": "quick",
+    "confirm_first": "quick",
     "McpClient": "tools", "Tool": "tools", "ToolCall": "tools", "current_session": "tools", "mcp_tools": "tools",
 }
 __all__ = sorted(_WHERE)

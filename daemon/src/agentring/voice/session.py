@@ -208,6 +208,7 @@ class CallSession:
         self.partial = {"user": "", "agent": ""}  # the turn still being transcribed
         self.tool_log: list[dict[str, Any]] = []
         self.last_user_speech_at = 0.0  # when someone on the call last said something (transcribed)
+        self.confirmations: dict[str, float] = {}  # tool request → when the user was asked to confirm it (quick.confirm_first)
         self.last_agent_audio_at = 0.0
         self.answered_at: float | None = None
         self._hangup_at = 0.0

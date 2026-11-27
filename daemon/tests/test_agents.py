@@ -37,6 +37,8 @@ mcp:
     assert [(m.url, m.tools, m.headers) for m in cfg.mcp] == [
         ("http://127.0.0.1:8787/mcp", None, {}), ("http://127.0.0.1:9000/mcp", ["status"], {"Authorization": "Bearer x"})]
     assert parse_agents(None).agents == []
+    assert parse_agents(None).confirm is True and cfg.confirm is True
+    assert parse_agents({"confirm": False}).confirm is False
 
 
 @pytest.mark.parametrize("data, error", [
@@ -47,6 +49,7 @@ mcp:
     ({"agents": [{"name": "a"}]}, "must map"),
     ({"mcp": [{"tools": ["x"]}]}, "needs a `url`"),
     ({"other": 1}, "unknown keys"),
+    ({"confirm": "no"}, "true or false"),
 ])
 def test_parse_agents_rejects(data, error):
     with pytest.raises(AgentsConfigError, match=error):

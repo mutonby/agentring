@@ -11,6 +11,7 @@ from typing import Any
 import websockets
 
 from .backend import AudioOut, Event, Interrupted, SessionEnding, ToolCalls, ToolResult, TurnComplete, Transcript
+from .phonic import untrusted_note
 from .tools import Tool, ToolCall
 
 log = logging.getLogger("agentring.voice.gemini")
@@ -83,6 +84,7 @@ class GeminiLive:
             "data": base64.b64encode(pcm).decode(), "mimeType": f"audio/pcm;rate={self.input_rate}"}}}))
 
     async def send_text(self, text: str, *, respond: bool, trusted: bool = True) -> None:
+        text = text if trusted else untrusted_note(text)
         await self._ws.send(json.dumps({"clientContent": {
             "turns": [{"role": "user", "parts": [{"text": text}]}], "turnComplete": respond}}))
 

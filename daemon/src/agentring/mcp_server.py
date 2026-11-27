@@ -44,6 +44,8 @@ INSTRUCTIONS = (
     "really needed: the phone rings and a voice AI talks to the user for you, then you get the transcript."
 )
 
+CALLER_NAME_MAX = 64  # the relay's limit on a call's agent_name
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "send_message",
@@ -74,6 +76,10 @@ TOOLS: list[dict[str, Any]] = [
             "context": {"type": "string", "description": ("What the voice AI should know, tell or ask the user "
                                                            "(it knows nothing else about your work).")},
             "urgent": {"type": "boolean", "description": "Ring like an alarm, bypassing Do Not Disturb if allowed."},
+            "caller_name": {"type": "string", "maxLength": CALLER_NAME_MAX,
+                            "description": "Caller name the phone shows, e.g. \"Claude Code\" (default: the server's)."},
+            "voice": {"type": "string", "description": ("The voice AI's voice: \"male\", \"female\" or one of the "
+                                                         "voice provider's voice names (default: the server's).")},
         }, "required": ["reason"]},
     },
     {
@@ -148,8 +154,9 @@ class AgentringTools:
     returned. `agents_file` (agents.yaml) gives the voice AI the user's agents and MCP
     servers on calls; None = none (the HTTP server never runs local commands for its users).
     `call_slots` caps voice calls across instances. `before_tool` gates the voice AI's tools on
-    calls (see `VoiceAgent`); the default is `after_user_speech`, because `context` comes from the
-    calling agent, which may be passing on text it read elsewhere: nothing runs on that text alone.
+    calls (see `VoiceAgent`); the default is `confirm_first` (`after_user_speech` with `confirm: false`
+    in agents.yaml), because `context` comes from the calling agent, which may be passing on text it
+    read elsewhere: nothing runs on that text alone, and the user hears what will run first.
     `upgrade_url` (hosted relays) is where the user can raise their plan's limits; it goes into
     quota errors."""
 
@@ -241,17 +248,29 @@ class AgentringTools:
                 return {"replies": replies}
             await asyncio.sleep(self.poll_s)
 
-    async def call(self, reason: str, context: str | None = None, urgent: bool = False) -> dict[str, Any]:
+    async def call(self, reason: str, context: str | None = None, urgent: bool = False,
+                   caller_name: str | None = None, voice: str | None = None) -> dict[str, Any]:
         try:
             from .voice import CallInfo
             from .voice.agents import AgentsConfigError, load_agents
-            from .voice.quick import DEFAULT_INSTRUCTIONS, after_user_speech, build_agent, missed_call_message
+            from .voice.quick import DEFAULT_INSTRUCTIONS, build_agent, missed_call_message
         except ImportError:
             raise ToolError("voice support is not installed: install agentring with the [voice] extra") from None
-        from .voice.providers import VoiceConfigError, resolve_voice
+        from .voice.providers import VoiceConfigError, pick_voice, resolve_voice
 
+        agent_name = self.agent_name
+        if caller_name is not None:
+            if not isinstance(caller_name, str) or not caller_name.strip():
+                raise ToolError("caller_name must be a non-empty string")
+            agent_name = caller_name.strip()
+            if len(agent_name) > CALLER_NAME_MAX:
+                raise ToolError(f"caller_name is longer than {CALLER_NAME_MAX} characters")
+        if voice is not None and not isinstance(voice, str):
+            raise ToolError("voice must be a string")
         try:  # AGENTRING_VOICE_PROVIDER/_MODEL/_NAME, like `call --ai`
             choice = resolve_voice()
+            if voice is not None:
+                choice = replace(choice, voice=pick_voice(choice.provider, voice))
         except VoiceConfigError as e:
             raise ToolError(f"calls: {e}") from None
         agents = None
@@ -271,13 +290,13 @@ class AgentringTools:
         try:
             async with self._call_lock:
                 built = await build_agent(choice, instructions=instructions, agents=agents,
-                                          before_tool=self.before_tool or after_user_speech)
+                                          before_tool=self.before_tool)
                 p = built.agent.prompts
                 built.agent.prompts = replace(p, minutes_low=with_upgrade_hint(p.minutes_low, self.upgrade_url))
                 try:
                     created = await asyncio.to_thread(self.client.create_call, reason,
                                                       priority="urgent" if urgent else "normal",
-                                                      agent_name=self.agent_name, device_ids=self.device_ids)
+                                                      agent_name=agent_name, device_ids=self.device_ids)
                     r = await built.agent.run(CallInfo(created["call"]["call_id"], reason, device_ids=self.device_ids),
                                               created["join"], relay=self.client)
                 finally:

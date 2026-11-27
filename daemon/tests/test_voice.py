@@ -496,7 +496,7 @@ class _FakeClient:
         return {"msg_id": "msg_1"}
 
 
-def _mcp_call(monkeypatch, tmp_path, **kw):
+def _mcp_call(monkeypatch, tmp_path, call_kw=None, choice=None, **kw):
     """Runs the MCP `call` tool with the voice stack stubbed; returns (result, client, what it was given)."""
     from agentring.mcp_server import AgentringTools
     from agentring.store import Store
@@ -505,14 +505,14 @@ def _mcp_call(monkeypatch, tmp_path, **kw):
     seen: dict = {}
 
     async def fake_build(choice, **build_kw):
-        seen.update(build_kw)
+        seen.update(build_kw, choice=choice)
         return _FakeBuilt(seen)
 
     monkeypatch.setattr(quick, "build_agent", fake_build)
-    monkeypatch.setattr(providers, "resolve_voice", lambda: object())
+    monkeypatch.setattr(providers, "resolve_voice", lambda: object() if choice is None else choice)
     client = _FakeClient()
     tools = AgentringTools(client, Store(tmp_path / "s.db"), agents_file=None, **kw)
-    out = asyncio.run(tools.call("Deploy blocked", context="Need OK for the migration."))
+    out = asyncio.run(tools.call("Deploy blocked", context="Need OK for the migration.", **(call_kw or {})))
     tools.store.close()
     return out, client, seen
 
@@ -538,15 +538,97 @@ def test_missed_group_call_still_leaves_a_message(monkeypatch, tmp_path):
     assert out["fallback_msg_id"] == "msg_1"
 
 
-def test_mcp_call_gates_tools_by_default(monkeypatch, tmp_path):
-    from agentring.voice.quick import after_user_speech
+def test_mcp_call_picks_the_caller_name_and_voice(monkeypatch, tmp_path):
+    from agentring.voice.providers import PROVIDERS, VoiceChoice
 
-    assert _mcp_call(monkeypatch, tmp_path)[2]["before_tool"] is after_user_speech
+    grok = VoiceChoice(PROVIDERS["grok"], "k", "grok-voice-latest", None)
+    out, client, seen = _mcp_call(monkeypatch, tmp_path, {"caller_name": " Claude Code ", "voice": "male"},
+                                  choice=grok, agent_name="Agent")
+    assert client.create_args["agent_name"] == "Claude Code" and seen["choice"].voice == "rex"
+    assert _mcp_call(monkeypatch, tmp_path / "b", {"voice": "Eve"}, choice=grok)[2]["choice"].voice == "eve"
+    # Left out: the server's name and voice.
+    out, client, seen = _mcp_call(monkeypatch, tmp_path / "c", choice=grok, agent_name="Agent")
+    assert client.create_args["agent_name"] == "Agent" and seen["choice"] is grok
+
+
+def test_mcp_call_refuses_a_bad_caller_name_or_voice(monkeypatch, tmp_path):
+    from agentring.mcp_server import ToolError
+    from agentring.voice.providers import PROVIDERS, VoiceChoice
+
+    grok = VoiceChoice(PROVIDERS["grok"], "k", "grok-voice-latest", None)
+    for i, kw in enumerate(({"caller_name": "  "}, {"caller_name": "x" * 65}, {"caller_name": 3},
+                            {"voice": "Charon"}, {"voice": 1})):
+        with pytest.raises(ToolError) as e:
+            _mcp_call(monkeypatch, tmp_path / str(i), kw, choice=grok)
+        assert ("caller_name" in str(e.value)) or ("voice" in str(e.value))
+    with pytest.raises(ToolError, match="male, female or one of ara, eve, leo, rex, sal"):
+        _mcp_call(monkeypatch, tmp_path / "v", {"voice": "Charon"}, choice=grok)
+
+
+def test_pick_voice():
+    from agentring.voice.providers import PROVIDERS, VoiceConfigError, pick_voice
+
+    assert pick_voice(PROVIDERS["gemini"], "MALE") == "Charon" and pick_voice(PROVIDERS["gemini"], "female") == "Kore"
+    assert pick_voice(PROVIDERS["openai"], "male") == "cedar" and pick_voice(PROVIDERS["openai"], "Ash") == "ash"
+    assert pick_voice(PROVIDERS["local"], "my-voice") == "my-voice"  # the user's own server: any name
+    for p, v in (("local", "male"), ("phonic", ""), ("gemini", "rex")):
+        with pytest.raises(VoiceConfigError):
+            pick_voice(PROVIDERS[p], v)
+
+
+def test_mcp_call_gates_tools_by_default(monkeypatch, tmp_path):
+    # None: build_agent picks the gate (confirm_first unless agents.yaml says `confirm: false`).
+    assert _mcp_call(monkeypatch, tmp_path)[2]["before_tool"] is None
 
     def mine(session, call):
         return None
 
     assert _mcp_call(monkeypatch, tmp_path, before_tool=mine)[2]["before_tool"] is mine
+
+
+def test_build_agent_asks_for_confirmation_by_default():
+    from agentring.voice import quick
+    from agentring.voice.agents import AgentsConfig
+
+    choice = type("Choice", (), {"factory": lambda self: _NullBackend, "with_language": lambda self, text: text})()
+    assert asyncio.run(quick.build_agent(choice)).agent.before_tool is quick.confirm_first
+    assert asyncio.run(quick.build_agent(choice, agents=AgentsConfig())).agent.before_tool is quick.confirm_first
+    relaxed = asyncio.run(quick.build_agent(choice, agents=AgentsConfig(confirm=False)))
+    assert relaxed.agent.before_tool is quick.after_user_speech
+
+
+def test_confirm_first_runs_a_tool_only_after_the_user_speaks_to_the_read_back(monkeypatch):
+    from agentring.voice import quick
+
+    clock = [1000.0]
+    monkeypatch.setattr(quick.time, "time", lambda: clock[0])
+
+    async def run():
+        ran: list[str] = []
+        tool = Tool("consult_agent", "Ask an agent.", lambda agent, task: ran.append(task) or "done",
+                    {"type": "object", "properties": {"agent": {"type": "string"}, "task": {"type": "string"}}})
+        s = CallSession(VoiceAgent(lambda: _NullBackend(), "x", [tool], before_tool=quick.confirm_first),
+                        CallInfo("call_1", "test"))
+        req = {"agent": "claude", "task": "deploy"}
+        out = [await s.run_tool(ToolCall("1", "consult_agent", req))]  # nobody has spoken yet
+        clock[0] = 1001.0
+        s.last_user_speech_at = clock[0]  # "hello?"
+        out.append(await s.run_tool(ToolCall("2", "consult_agent", req)))  # first ask: read it back
+        out.append(await s.run_tool(ToolCall("3", "consult_agent", req)))  # again, no new speech: refused
+        out.append(await s.run_tool(ToolCall("4", "consult_agent", {"agent": "claude", "task": "rm -rf"})))  # other request: asks
+        clock[0] = 1005.0
+        s.last_user_speech_at = clock[0]  # the user answers the read-back
+        out.append(await s.run_tool(ToolCall("5", "consult_agent", req)))
+        out.append(await s.run_tool(ToolCall("6", "consult_agent", req)))  # runs once per yes
+        return out, ran
+
+    out, ran = asyncio.run(run())
+    assert out[0] == quick.NO_USER_YET
+    assert out[1].startswith("Not run yet.") and '"task": "deploy"' in out[1]
+    assert out[2] == quick.NOT_CONFIRMED
+    assert out[3].startswith("Not run yet.") and "rm -rf" in out[3]
+    assert out[4] == "done" and ran == ["deploy"]
+    assert out[5].startswith("Not run yet.")
 
 
 def test_build_agent_passes_before_tool(monkeypatch):
@@ -558,7 +640,8 @@ def test_build_agent_passes_before_tool(monkeypatch):
     choice = type("Choice", (), {"factory": lambda self: _NullBackend, "with_language": lambda self, text: text})()
     built = asyncio.run(quick.build_agent(choice, before_tool=gate))
     assert built.agent.before_tool is gate
-    assert asyncio.run(quick.build_agent(choice)).agent.before_tool is None  # `call --ai`, `serve --ai`: unchanged
+    # `call --ai`, `serve --ai`: gated too (test_build_agent_asks_for_confirmation_by_default)
+    assert asyncio.run(quick.build_agent(choice)).agent.before_tool is quick.confirm_first
 
 
 def test_instructions_ask_to_talk_before_tools():

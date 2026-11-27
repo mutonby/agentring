@@ -19,6 +19,7 @@ from urllib.parse import quote
 import websockets
 
 from .backend import AudioOut, Event, Interrupted, ToolCalls, ToolResult, TurnComplete, Transcript
+from .phonic import untrusted_note
 from .tools import Tool, ToolCall
 
 log = logging.getLogger("agentring.voice.openai")
@@ -92,6 +93,7 @@ class OpenAIRealtime:
         await self._ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": base64.b64encode(pcm).decode()}))
 
     async def send_text(self, text: str, *, respond: bool, trusted: bool = True) -> None:
+        text = text if trusted else untrusted_note(text)
         await self._ws.send(json.dumps({"type": "conversation.item.create", "item": {
             "type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}}))
         if respond:

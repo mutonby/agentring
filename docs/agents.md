@@ -28,7 +28,7 @@ the daemon's config (`agentring init`), so run `agentring init` and
 `agentring pair` first. Other harnesses: see [recipes](#recipes-by-harness).
 
 `agentring mcp --agent-name "Claude Code"` sets the caller name the phone shows (useful
-when several agents share one relay), and `--device dev_…` (repeatable) rings only those
+when several agents share one relay; a call's `caller_name` overrides it), and `--device dev_…` (repeatable) rings only those
 phones instead of every paired one.
 
 `call` blocks until the call ends, and `get_replies` up to `wait_s`: raise the
@@ -39,7 +39,7 @@ opencode: 30 s, Hermes: 300 s).
 |---|---|
 | `send_message(text, reply_to?)` | Sends a message to the phone (a notification you can reply to inline). Returns `msg_id`. |
 | `get_replies(wait_s?)` | Your new replies, each one returned once. `wait_s` waits up to that long for one (max 3600). |
-| `call(reason, context?, urgent?)` | The phone rings. When you answer, the voice AI says why it's calling, talks with you, and hangs up when you're done. Returns the transcript, how long the call lasted, why it ended and which tools were used. Blocks until the call ends. Needs the `[voice]` extra and the voice provider's key (`GEMINI_API_KEY` by default; `AGENTRING_VOICE_PROVIDER` picks another, see [voice.md](voice.md#providers)). |
+| `call(reason, context?, urgent?, caller_name?, voice?)` | The phone rings. When you answer, the voice AI says why it's calling, talks with you, and hangs up when you're done. Returns the transcript, how long the call lasted, why it ended and which tools were used. Blocks until the call ends. `caller_name` is the name the phone shows for this call; `voice` is `male`, `female` or one of the provider's voice names (both default to the server's). Needs the `[voice]` extra and the voice provider's key (`GEMINI_API_KEY` by default; `AGENTRING_VOICE_PROVIDER` picks another, see [voice.md](voice.md#providers)). |
 | `status()` | Whether the relay is reachable and which phones are paired. |
 
 `context` is everything the voice AI knows about the agent's work: put in it what
@@ -143,6 +143,7 @@ for example as a service in `deploy/docker-compose.yml`, routed at `/mcp` by the
 during a call:
 
 ```yaml
+confirm: true                # default: the voice AI says what it will run and waits for your yes
 agents:
   claude:
     description: Claude Code in my web app's repo. Code questions, CI status, deploys.
@@ -172,6 +173,11 @@ mcp:                         # MCP servers over Streamable HTTP; their tools go 
 - The agent runs with your environment plus `env` and `AGENTRING_CALL_ID`, in `cwd`.
   The call id lets an agent keep one session per call (see [OpenClaw](#openclaw)).
 - **`description` matters**: the voice AI picks the agent by it.
+- **Each agent or tool runs only after you say yes.** The voice AI first tells you what
+  it is about to run ("I'll ask Claude to deploy to staging, OK?") and runs it when you
+  answer. That way text the agent read somewhere, or another agent's answer, can't run
+  anything on its own. `confirm: false` skips the question (tools then run once anyone
+  on the call has spoken); do it only if every agent here is read-only.
 - Over the phone, expose only what the caller should be able to do: use
   allowlists, and agents whose permissions you'd accept from someone holding your
   phone. The phone is paired to your relay, but the voice AI acts on what it hears.
